@@ -6,7 +6,7 @@ This project is a Python-based tool that censors bad words in audio files by app
 - **Transcription**: Uses Whisper for word-level transcription with accurate timestamps.
 - **Bad Word Detection**: Matches transcript words with a custom bad words dictionary.
 - **Censorship Effects**: Applies a reversing effect to the detected bad words' segments.
-- **Lyrics Alignment**: Optionally aligns provided lyrics with transcript for improved accuracy.
+- **WIP: Custom timestamps and Lyrics Alignment**: Optionally aligns provided lyrics with transcript for improved accuracy. Still in progress though.
 
 ## Installation
 1. Clone this repository:
