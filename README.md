@@ -1,7 +1,8 @@
 # Censor My Py! [Music Censorship Tool]
 
 This project is a Python-based tool that censors bad words in audio files by applying effects like reversing the audio or acapella separation at specific timestamps. It uses OpenAI's Whisper model to transcribe the audio, detect bad words based on a provided dictionary, and modify the audio accordingly.
-For the acapella and instrumental stem separation I used spleeter and TF of course
+
+For the acapella and instrumental stem separation I used spleeter and TF of course.
 
 ## Features
 - **Transcription**: Uses Whisper for word-level transcription with accurate timestamps.
