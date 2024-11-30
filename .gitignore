@@ -1,3 +1,4 @@
-songx.mp3
-song.mp3
-censored_output.mp3
+*.mp3
+bad_words.txt
+lyrics.txt
+pretrained_models
