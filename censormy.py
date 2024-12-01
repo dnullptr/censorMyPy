@@ -1,8 +1,7 @@
 import whisper
 import argparse
+import os
 from pydub import AudioSegment
-from difflib import SequenceMatcher
-from pydub.playback import play
 from spleeter.separator import Separator
 
 model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
@@ -21,7 +20,11 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     """
     # Step 1: Separate vocals and instrumentals
     print(f'[+] Separation in Progress..')
-    vocals_path, instrumental_path = separate_audio(audio_file_path)
+    if os.path.exists(f'separated_audio/song/accompaniment.wav'):
+        instrumental_path = f'separated_audio/song/accompaniment.wav'
+    else:
+        print(f'Error! Separated intrumental not found. Had the separator not worked firstly?')
+    
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
@@ -53,32 +56,6 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     censored_audio.export(output_file, format="mp3")
     print(f"Censored audio saved to {output_file}")
     
-
-
-
-'''
-    # Step 3: Load vocals and instrumentals as Pydub AudioSegments
-    vocals = AudioSegment.from_file(vocals_path)
-    instrumental = AudioSegment.from_file(instrumental_path)
-
-    # Step 4: Replace bad word segments in vocals with instrumentals
-    output_audio = vocals[:]  # Create a copy of the original vocals
-    print(f'[+] Create a copy of the original vocals in Progress..')
-    for start, end in bad_word_timestamps:
-        start_ms = int(start * 1000)  # Convert to milliseconds
-        end_ms = int(end * 1000)
-        # Replace vocals with corresponding instrumental segment
-        output_audio = (
-            output_audio[:start_ms]
-            + instrumental[start_ms:end_ms]
-            + output_audio[end_ms:]
-        )
-
-    # Step 5: Export the censored audio
-    output_audio.export(output_file, format="mp3")
-    print(f"Censored audio saved to {output_file}")
-'''
-
 
 def get_bad_word_timestamps(audio_file_path, bad_words):
     result = model.transcribe(audio_file_path, fp16=False)
@@ -158,7 +135,8 @@ def main():
 
     if args.method == "v":
         print("Using vocal separation method...")
-        censor_with_instrumentals(args.audio_file, bad_words, args.output)
+        separate_audio(args.audio_file)
+        #censor_with_instrumentals(args.audio_file, bad_words, args.output)
     elif args.method == "b":
         print("Using backspin method...")
         censor_with_backspin(args.audio_file, bad_words, args.output)
