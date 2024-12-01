@@ -2,17 +2,19 @@ import whisper
 import argparse
 import os
 from pydub import AudioSegment
-from spleeter.separator import Separator
 
-model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
+from module_context import ModuleContext
+
 
 def separate_audio(input_audio_path, output_dir="separated"):
     """
     Separates the input audio into vocals and instrumental using Spleeter.
     """
-    separator = Separator('spleeter:2stems')  # 2 stems: vocals + instrumental
-    separator.separate_to_file(input_audio_path, output_dir)
-    return f"{output_dir}/separated_audio/vocals.wav", f"{output_dir}/separated_audio/accompaniment.wav"
+    with ModuleContext("spleeter.separator") as modules:
+        Separator = modules["spleeter.separator"].Separator
+        separator = Separator('spleeter:2stems')  # 2 stems: vocals + instrumental
+        separator.separate_to_file(input_audio_path, output_dir)
+        return f"{output_dir}/separated_audio/vocals.wav", f"{output_dir}/separated_audio/accompaniment.wav"
 
 def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_output.mp3"):
     """
@@ -20,8 +22,8 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     """
     # Step 1: Separate vocals and instrumentals
     print(f'[+] Separation in Progress..')
-    if os.path.exists(f'separated_audio/song/accompaniment.wav'):
-        instrumental_path = f'separated_audio/song/accompaniment.wav'
+    if os.path.exists(f'separated/song/accompaniment.wav'):
+        instrumental_path = f'separated/song/accompaniment.wav'
     else:
         print(f'Error! Separated intrumental not found. Had the separator not worked firstly?')
     
@@ -30,10 +32,9 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
 
-#try start
-    
     audio = AudioSegment.from_mp3(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
+
     censored_audio = AudioSegment.empty()  # Start with an empty audio segment
     previous_end_time = 0  # Keep track of the end of the last processed segment
   
@@ -56,8 +57,9 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     censored_audio.export(output_file, format="mp3")
     print(f"Censored audio saved to {output_file}")
     
-
 def get_bad_word_timestamps(audio_file_path, bad_words):
+
+    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
     result = model.transcribe(audio_file_path, fp16=False)
     bad_word_timestamps = []
     
@@ -73,6 +75,7 @@ def get_bad_word_timestamps(audio_file_path, bad_words):
 
 def print_transcribed_words(audio_file_path):
     # Transcribe the audio using Whisper
+    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
     result = model.transcribe(audio_file_path, fp16=False)
 
     print("Recognized words and their timestamps:")
@@ -136,7 +139,8 @@ def main():
     if args.method == "v":
         print("Using vocal separation method...")
         separate_audio(args.audio_file)
-        #censor_with_instrumentals(args.audio_file, bad_words, args.output)
+        censor_with_instrumentals(args.audio_file, bad_words, args.output)
+
     elif args.method == "b":
         print("Using backspin method...")
         censor_with_backspin(args.audio_file, bad_words, args.output)
@@ -145,4 +149,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
