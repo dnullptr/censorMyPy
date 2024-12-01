@@ -20,25 +20,50 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     Censors bad words by replacing vocal segments with instrumentals.
     """
     # Step 1: Separate vocals and instrumentals
+    print(f'[+] Separation in Progress..')
     vocals_path, instrumental_path = separate_audio(audio_file_path)
 
     # Step 2: Transcribe vocals to find bad words
-
-    # This standalone code in # didn't prove itself 
-    # result = model.transcribe(vocals_path, fp16=False, word_timestamps=True)
-    # bad_word_timestamps = []
-    # for segment in result['segments']:
-    #     for word in segment['words']:
-    #         if word['word'].lower() in bad_words:
-    #             bad_word_timestamps.append((word['start'], word['end']))
+    print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
 
+#try start
+    
+    audio = AudioSegment.from_mp3(audio_file_path)
+    instrumental = AudioSegment.from_file(instrumental_path)
+    censored_audio = AudioSegment.empty()  # Start with an empty audio segment
+    previous_end_time = 0  # Keep track of the end of the last processed segment
+  
+    # Process each bad word segment
+    for start_time, end_time in bad_word_timestamps:
+        # Add the audio before the bad word
+        censored_audio += audio[previous_end_time:start_time]
+        print(f"[-] Processing segment: {start_time} ms to {end_time} ms")
+        # Reverse only the segment containing the bad word
+        censored_segment = instrumental[start_time:end_time]
+        censored_audio += censored_segment
+
+        # Update the end time of the last processed segment
+        previous_end_time = end_time
+
+    # Add the remaining audio after the last bad word
+    censored_audio += audio[previous_end_time:]
+
+    # Save the censored audio to the output file
+    censored_audio.export(output_file, format="mp3")
+    print(f"Censored audio saved to {output_file}")
+    
+
+
+
+'''
     # Step 3: Load vocals and instrumentals as Pydub AudioSegments
     vocals = AudioSegment.from_file(vocals_path)
     instrumental = AudioSegment.from_file(instrumental_path)
 
     # Step 4: Replace bad word segments in vocals with instrumentals
     output_audio = vocals[:]  # Create a copy of the original vocals
+    print(f'[+] Create a copy of the original vocals in Progress..')
     for start, end in bad_word_timestamps:
         start_ms = int(start * 1000)  # Convert to milliseconds
         end_ms = int(end * 1000)
@@ -52,7 +77,7 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     # Step 5: Export the censored audio
     output_audio.export(output_file, format="mp3")
     print(f"Censored audio saved to {output_file}")
-
+'''
 
 
 def get_bad_word_timestamps(audio_file_path, bad_words):
@@ -60,6 +85,7 @@ def get_bad_word_timestamps(audio_file_path, bad_words):
     bad_word_timestamps = []
     
     # Check for bad words in the segments, probably 5-sec ones.
+    print(f'[+] Bad words segmentation method running..')
     for segment in result['segments']:
         start_time = int(segment['start'] * 1000)  # ms
         end_time = int(segment['end'] * 1000)
@@ -82,17 +108,18 @@ def print_transcribed_words(audio_file_path):
 # Function to censor bad words in audio with a backspin effect
 def censor_with_backspin(audio_file_path, bad_words, output_file_path="censored_output.mp3"):
     audio = AudioSegment.from_mp3(audio_file_path)
+    print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
    
 
     censored_audio = AudioSegment.empty()  # Start with an empty audio segment
     previous_end_time = 0  # Keep track of the end of the last processed segment
-
+  
     # Process each bad word segment
     for start_time, end_time in bad_word_timestamps:
         # Add the audio before the bad word
         censored_audio += audio[previous_end_time:start_time]
-        print(f"Processing segment: {start_time} ms to {end_time} ms")
+        print(f"[-] Processing segment: {start_time} ms to {end_time} ms")
         # Reverse only the segment containing the bad word
         censored_segment = audio[start_time:end_time].reverse()
         censored_audio += censored_segment
@@ -136,11 +163,6 @@ def main():
         print("Using backspin method...")
         censor_with_backspin(args.audio_file, bad_words, args.output)
 
-    audio_file_path = "song.mp3"  
-      # Define your bad words
-    #print_transcribed_words(audio_file_path)
-    # lyrics = open('lyrics.txt',"r+").read()
-    # #print(lyrics)
     
 
 if __name__ == "__main__":
