@@ -14,7 +14,7 @@ For the acapella and instrumental stem separation I used spleeter and TF of cour
 
 ## Pre-Requirements
 
-   1. If you're willing to use separation method, Install CUDA 11.x and cuDNN
+   1. If you're willing to use separation method, Install CUDA 11.x and cuDNN 8.x
    2. If you're having issues of DLLs not found while using the tool, download and place them inside your CUDA/bin (instead of inside their original NVIDIA intended dir).
   
 
