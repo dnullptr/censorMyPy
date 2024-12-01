@@ -56,6 +56,50 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     # Save the censored audio to the output file
     censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
+
+def censor_with_both(audio_file_path, bad_words, output_file="censored_output.mp3"):
+    """
+    Censors bad words by reversing vocal segments with the song original instrumentals.
+    """
+    # Step 1: Separate vocals and instrumentals
+    print(f'[+] Separation in Progress..')
+    if all([os.path.exists(f'separated/song/accompaniment.wav'), os.path.exists(f'separated/song/vocals.wav')]):
+        instrumental_path = f'separated/song/accompaniment.wav'
+        vocal_path = f'separated/song/vocals.wav'
+    else:
+        print(f'Error! Separated files not found. Had the separator not worked firstly?')
+    
+    
+
+    # Step 2: Transcribe vocals to find bad words
+    print(f'[+] Transcribe vocals to find bad words in Progress..')
+    bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
+
+    audio = AudioSegment.from_mp3(audio_file_path)
+    instrumental = AudioSegment.from_file(instrumental_path)
+    vocals = AudioSegment.from_file(vocal_path)
+
+    censored_audio = AudioSegment.empty()  # Start with an empty audio segment
+    previous_end_time = 0  # Keep track of the end of the last processed segment
+  
+    # Process each bad word segment
+    for start_time, end_time in bad_word_timestamps:
+        # Add the audio before the bad word
+        censored_audio += audio[previous_end_time:start_time]
+        print(f"[-] Processing segment: {start_time} ms to {end_time} ms")
+        # Reverse only the segment containing the bad word
+        censored_segment : AudioSegment = instrumental[start_time:end_time]
+        censored_audio += censored_segment.overlay(vocals[start_time:end_time].reverse())
+
+        # Update the end time of the last processed segment
+        previous_end_time = end_time
+
+    # Add the remaining audio after the last bad word
+    censored_audio += audio[previous_end_time:]
+
+    # Save the censored audio to the output file
+    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    print(f"Censored audio saved to {output_file}")
     
 def get_bad_word_timestamps(audio_file_path, bad_words):
 
@@ -124,9 +168,9 @@ def main():
     parser.add_argument("bad_words_file",help="Path to the bad words file.")
     parser.add_argument(
         "--method",
-        choices=["v", "b"],
+        choices=["v", "b", "vb"],
         required=True,
-        help="Censorship method: 'v' for vocal separation, 'b' for backspin.",
+        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both.",
     )
     parser.add_argument("--output", default="censored_output.mp3", help="Output file path.")
     args = parser.parse_args()
@@ -144,6 +188,11 @@ def main():
     elif args.method == "b":
         print("Using backspin method...")
         censor_with_backspin(args.audio_file, bad_words, args.output)
+
+    elif args.method == "vb":
+        print("Using vocal + backspin method...")
+        separate_audio(args.audio_file)
+        censor_with_both(args.audio_file, bad_words, args.output)
 
     
 
