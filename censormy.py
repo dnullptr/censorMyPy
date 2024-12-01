@@ -23,23 +23,36 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     vocals_path, instrumental_path = separate_audio(audio_file_path)
 
     # Step 2: Transcribe vocals to find bad words
-    result = model.transcribe(vocals_path, fp16=False, word_timestamps=True)
-    bad_word_timestamps = []
-    for segment in result['segments']:
-        for word in segment['words']:
-            if word['word'].lower() in bad_words:
-                bad_word_timestamps.append((word['start'], word['end']))
+
+    # This standalone code in # didn't prove itself 
+    # result = model.transcribe(vocals_path, fp16=False, word_timestamps=True)
+    # bad_word_timestamps = []
+    # for segment in result['segments']:
+    #     for word in segment['words']:
+    #         if word['word'].lower() in bad_words:
+    #             bad_word_timestamps.append((word['start'], word['end']))
+    bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
 
     # Step 3: Load vocals and instrumentals as Pydub AudioSegments
     vocals = AudioSegment.from_file(vocals_path)
     instrumental = AudioSegment.from_file(instrumental_path)
 
     # Step 4: Replace bad word segments in vocals with instrumentals
-    output_audio = AudioSegment.silent(duration=len(vocals))
-    for i, segment in enumerate(vocals[::1000]):  # Process every second
-        segment_start = i * 1000
-        if any(start <= segment_start / 1000 <= end for start, end in bad_word_timestamps):
-            output_audio += vocals.merge(stripAudio)
+    output_audio = vocals[:]  # Create a copy of the original vocals
+    for start, end in bad_word_timestamps:
+        start_ms = int(start * 1000)  # Convert to milliseconds
+        end_ms = int(end * 1000)
+        # Replace vocals with corresponding instrumental segment
+        output_audio = (
+            output_audio[:start_ms]
+            + instrumental[start_ms:end_ms]
+            + output_audio[end_ms:]
+        )
+
+    # Step 5: Export the censored audio
+    output_audio.export(output_file, format="mp3")
+    print(f"Censored audio saved to {output_file}")
+
 
 
 def get_bad_word_timestamps(audio_file_path, bad_words):
