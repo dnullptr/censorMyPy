@@ -54,7 +54,7 @@ def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_
     censored_audio += audio[previous_end_time:]
 
     # Save the censored audio to the output file
-    censored_audio.export(output_file, format="mp3")
+    censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
     
 def get_bad_word_timestamps(audio_file_path, bad_words):
