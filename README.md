@@ -14,9 +14,10 @@ For the acapella and instrumental stem separation I used spleeter and TF of cour
 
 ## Pre-Requirements
 
-   1. If you're willing to use separation method, Install CUDA 11.x and cuDNN 8.x
-   2. If you're having issues of DLLs not found while using the tool, download and place them inside your CUDA/bin (instead of inside their original NVIDIA intended dir).
-  
+   1. FFmpeg - Pydub requires FFmpeg to process audio files; You need to install FFmpeg separately. (Add FFmpeg to your system PATH if it isn't already there).
+   2. If you're willing to use separation method, Install CUDA 11.x and cuDNN 8.x
+   3. If you're having issues of DLLs not found while using the tool, download and place them inside your CUDA/bin (instead of inside their original NVIDIA intended dir).
+ 
 
 ## Installation
 1. Clone this repository:
