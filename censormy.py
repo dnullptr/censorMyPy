@@ -29,7 +29,7 @@ def down_pitch(input_path, output_path, semitones):
     y, sr = librosa.load(input_path, sr=None)
 
     # Down-pitch the audio
-    y_shifted = librosa.effects.pitch_shift(y, sr, n_steps=-semitones)
+    y_shifted = librosa.effects.pitch_shift(y=y, sr=sr, n_steps=-semitones)
     print(f"[-] Down-shifted the pitch, saving..")
     # Save the processed audio
     sf.write(output_path, y_shifted, sr)
@@ -156,7 +156,8 @@ def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_outp
         cur_vocal_to_downpitch = vocals[start_time:end_time]
         cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
         print(f"[+] Calling downpitch... ")
-        down_pitch('temp.mp3','down_temp.mp3',4)
+        
+        down_pitch('temp.mp3','down_temp.mp3',semitones=12) # 12 semi-tones should be enough to sound screwed.
         print(f"[-] Mixing segment as censored...")
         downpitched = AudioSegment.from_file('down_temp.mp3')
         censored_audio += censored_segment.overlay(downpitched)
