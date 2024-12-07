@@ -9,6 +9,7 @@ For the acapella and instrumental stem separation I used spleeter and TF of cour
 - **Bad Word Detection**: Matches transcript words with a custom bad words dictionary.
 - **Backspin Censorship Effect**: Choose between applying a reversing effect to the detected bad words' segments that behaves like a '90s backspin!
 - **Acapella Stem Separation**: Use acapella separation method like all clean song versions in the industry to censor, leaving the 'dirty' section instrumental.
+- **Downpitched Acapella**: Use down-pitched vocals to censor, leaving the 'dirty' section blurry and interview-like unclear.
 - **WIP: Custom timestamps and Lyrics Alignment**: Optionally aligns provided lyrics with transcript for improved accuracy. Still in progress though.
 
 
