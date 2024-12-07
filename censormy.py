@@ -148,14 +148,14 @@ def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_outp
     for start_time, end_time in bad_word_timestamps:
         # Add the audio before the bad word
         censored_audio += audio[previous_end_time:start_time]
-        print(f"[-] Processing segment: {start_time} ms to {end_time} ms")
+        print(f"[+] Processing segment: {start_time} ms to {end_time} ms")
         # Reverse only the segment containing the bad word
         censored_segment : AudioSegment = instrumental[start_time:end_time]
 
         print(f"[-] Preparing current segment for down-pitch..")
         cur_vocal_to_downpitch = vocals[start_time:end_time]
         cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
-        print(f"[+] Calling downpitch... ")
+        print(f"[-] Calling downpitch... ")
         
         down_pitch('temp.mp3','down_temp.mp3',semitones=12) # 12 semi-tones should be enough to sound screwed.
         print(f"[-] Mixing segment as censored...")
@@ -240,7 +240,7 @@ def main():
         "--method",
         choices=["v", "b", "vb", "p"],
         required=True,
-        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both.",
+        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both, 'p' for down-pitch.",
     )
     parser.add_argument("--output", default="censored_output.mp3", help="Output file path.")
     args = parser.parse_args()
