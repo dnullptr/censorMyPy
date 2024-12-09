@@ -1,7 +1,8 @@
-import whisper
 import os
+import whisper
 import librosa
 import soundfile as sf
+import asyncio
 from pydub import AudioSegment
 from shutil import rmtree
 from module_context import ModuleContext
@@ -11,6 +12,7 @@ async def separate_audio(input_audio_path, output_dir="separated"):
     """
     Separates the input audio into vocals and instrumental using Spleeter.
     """
+    print(f'[+] Separation in Progress..')
     with ModuleContext("spleeter.separator") as modules:
         Separator = modules["spleeter.separator"].Separator
         separator = Separator('spleeter:2stems')  # 2 stems: vocals + instrumental
@@ -37,12 +39,13 @@ async def censor_with_instrumentals(audio_file_path, bad_words, output_file="cen
     """
     Censors bad words by replacing vocal segments with instrumentals.
     """
-    # Step 1: Separate vocals and instrumentals
-    print(f'[+] Separation in Progress..')
-    if os.path.exists(f'separated/song/accompaniment.wav'):
-        instrumental_path = f'separated/song/accompaniment.wav'
+    # Step 1: Separated vocals and instrumentals should be in their dir.
+    filename = audio_file_path.split('.')[0] # without extension
+    if os.path.exists(f'separated/{filename}/accompaniment.wav'):
+        instrumental_path = f'separated/{filename}/accompaniment.wav'
     else:
         print(f'Error! Separated intrumental not found. Had the separator not worked firstly?')
+        exit()
     
 
     # Step 2: Transcribe vocals to find bad words
@@ -78,13 +81,14 @@ async def censor_with_both(audio_file_path, bad_words, output_file="censored_out
     """
     Censors bad words by reversing vocal segments with the song original instrumentals.
     """
-    # Step 1: Separate vocals and instrumentals
-    print(f'[+] Separation in Progress..')
-    if all([os.path.exists(f'separated/song/accompaniment.wav'), os.path.exists(f'separated/song/vocals.wav')]):
-        instrumental_path = f'separated/song/accompaniment.wav'
-        vocal_path = f'separated/song/vocals.wav'
+    # Step 1: Separated vocals and instrumentals should be in their dir.
+    filename = audio_file_path.split('.')[0] # without extension
+    if all([os.path.exists(f'separated/{filename}/accompaniment.wav'), os.path.exists(f'separated/{filename}/vocals.wav')]):
+        instrumental_path = f'separated/{filename}/accompaniment.wav'
+        vocal_path = f'separated/{filename}/vocals.wav'
     else:
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
+        exit()
     
     
 
@@ -122,11 +126,11 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
     """
     Censors bad words by downpitching vocal segments with the song original instrumentals.
     """
-    # Step 1: Separate vocals and instrumentals
-    print(f'[+] Separation in Progress..')
-    if all([os.path.exists(f'separated/song/accompaniment.wav'), os.path.exists(f'separated/song/vocals.wav')]):
-        instrumental_path = f'separated/song/accompaniment.wav'
-        vocal_path = f'separated/song/vocals.wav'
+    # Step 1: Separated vocals and instrumentals should be in their dir.
+    filename = audio_file_path.split('.')[0] # without extension
+    if all([os.path.exists(f'separated/{filename}/accompaniment.wav'), os.path.exists(f'separated/{filename}/vocals.wav')]):
+        instrumental_path = f'separated/{filename}/accompaniment.wav'
+        vocal_path = f'separated/{filename}/vocals.wav'
     else:
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
     
@@ -172,6 +176,7 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
     print(f"Censored audio saved to {output_file}")
 
 async def censor_with_backspin(audio_file_path, bad_words, output_file_path="censored_output.mp3"):
+    # Oldest method in the book
     audio = AudioSegment.from_mp3(audio_file_path)
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = get_bad_word_timestamps(audio_file_path, bad_words)
@@ -198,8 +203,8 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
     # Save the censored audio to the output file
     censored_audio.export(output_file_path, format="mp3")
     print(f"Censored audio saved to {output_file_path}")
-    
-async def get_bad_word_timestamps(audio_file_path, bad_words):
+
+def get_bad_word_timestamps(audio_file_path, bad_words):
 
     model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
     result = model.transcribe(audio_file_path, fp16=False)
@@ -215,14 +220,5 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
 
     return bad_word_timestamps
 
-async def print_transcribed_words(audio_file_path):
-    # Transcribe the audio using Whisper
-    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
-    result = model.transcribe(audio_file_path, fp16=False,word_timestamps=True)
-
-    print("Recognized words and their timestamps:")
-    for segment in result['segments']:
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
-        print(f"From {start_time:.2f}s to {end_time:.2f}s: {text}")
+async def run_in_thread(coro):
+    await asyncio.to_thread(asyncio.run, coro) 

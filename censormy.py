@@ -1,6 +1,7 @@
 import argparse
+import time
 from toolset import *
-
+import async_toolset as ats
 
 def main():
     parser = argparse.ArgumentParser(description="Kudsha's Sound System")
@@ -17,6 +18,8 @@ def main():
     parser.add_argument("--output", default="censored_output.mp3", help="Output file path.")
     args = parser.parse_args()
 
+    # Time now for execution benchmarking
+    start = time.time()
 
     # Read bad words from file
     with open(args.bad_words_file, "r") as f:
@@ -40,6 +43,10 @@ def main():
         print("Using vocal downpitch method...")
         separate_audio(args.audio_file)
         censor_with_downpitch(args.audio_file, bad_words, args.output)
+    
+    # End time
+    end = time.time()
+    print(f'[=] Took {end-start} seconds to run')
 
 if __name__ == "__main__":
    main()
