@@ -25,3 +25,14 @@ For the acapella and instrumental stem separation I used spleeter and TF of cour
    ```bash
    git clone https://github.com/dnullptr/censorMyPy.git
    cd censorMyPy
+
+2. Install Python 3.10.x
+    On Linux servers/terminal-based distros, Install a virtual environment for Python 3.10.x (PyEnv working method below:)
+      ```bash
+      echo -e 'export PYENV_ROOT="$HOME/.pyenv"\nexport PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
+      echo -e 'eval "$(pyenv init --path)"\neval "$(pyenv init -)"' >> ~/.bashrc
+      exec "$SHELL"
+      pyenv install 3.10.0
+      pyenv global 3.10.0
+      ```
+   On Linux Windows, Just manually make venv with Python 3.10.x.
