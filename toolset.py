@@ -14,7 +14,7 @@ def separate_audio(input_audio_path, output_dir="separated"):
     print(f'[+] Separation in Progress..')
     with ModuleContext("spleeter.separator") as modules:
         Separator = modules["spleeter.separator"].Separator
-        separator = Separator('spleeter:2stems')  # 2 stems: vocals + instrumental
+        separator = Separator('spleeter:2stems-16kHz')  # 2 stems: vocals + instrumental
         separator.separate_to_file(input_audio_path, output_dir)
         return f"{output_dir}/separated_audio/vocals.wav", f"{output_dir}/separated_audio/accompaniment.wav"
 

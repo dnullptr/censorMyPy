@@ -15,7 +15,7 @@ async def separate_audio(input_audio_path, output_dir="separated"):
     print(f'[+] Separation in Progress..')
     with ModuleContext("spleeter.separator") as modules:
         Separator = modules["spleeter.separator"].Separator
-        separator = Separator('spleeter:2stems')  # 2 stems: vocals + instrumental
+        separator = Separator('spleeter:2stems-16kHz')  # 2 stems: vocals + instrumental
         separator.separate_to_file(input_audio_path, output_dir)
         return f"{output_dir}/separated_audio/vocals.wav", f"{output_dir}/separated_audio/accompaniment.wav"
 
@@ -160,7 +160,7 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
         cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
         print(f"[-] Calling downpitch... ")
         
-        down_pitch('temp.mp3','down_temp.mp3',semitones=12) # 12 semi-tones should be enough to sound screwed.
+        down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
         print(f"[-] Mixing segment as censored...")
         downpitched = AudioSegment.from_file('down_temp.mp3')
         censored_audio += censored_segment.overlay(downpitched)
@@ -219,6 +219,11 @@ def get_bad_word_timestamps(audio_file_path, bad_words):
             bad_word_timestamps.append((start_time, end_time))
 
     return bad_word_timestamps
+
+def cleanup():
+    print(f'[-] Running clean-up..')
+    os.remove('down_temp.mp3') if os.path.exists('down_temp.mp3') else None
+    rmtree('separated') if os.path.exists('separated') else None
 
 async def run_in_thread(coro):
     await asyncio.to_thread(asyncio.run, coro) 

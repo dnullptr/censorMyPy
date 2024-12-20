@@ -47,6 +47,7 @@ def main():
     # End time
     end = time.time()
     print(f'[=] Took {end-start} seconds to run')
+    cleanup()
 
 if __name__ == "__main__":
    main()
