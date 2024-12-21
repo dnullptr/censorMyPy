@@ -315,6 +315,6 @@ def print_transcribed_words(audio_file_path):
         print(f"From {start_time:.2f}s to {end_time:.2f}s: {text}")
 
 def cleanup():
-    print(f'[-] Running clean-up..')
+    print(f'[=] Running clean-up..')
     os.remove('down_temp.mp3') if os.path.exists('down_temp.mp3') else None
     rmtree('separated') if os.path.exists('separated') else None
