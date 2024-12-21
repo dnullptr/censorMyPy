@@ -132,7 +132,7 @@ def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_outp
         vocal_path = f'separated/{filename}/vocals.wav'
     else:
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
-    
+        exit()
     
 
     # Step 2: Transcribe vocals to find bad words
@@ -159,10 +159,73 @@ def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_outp
         cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
         print(f"[-] Calling downpitch... ")
         
-        down_pitch('temp.mp3','down_temp.mp3',semitones=12) # 12 semi-tones should be enough to sound screwed.
+        down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
         print(f"[-] Mixing segment as censored...")
         downpitched = AudioSegment.from_file('down_temp.mp3')
         censored_audio += censored_segment.overlay(downpitched)
+
+        # Update the end time of the last processed segment
+        previous_end_time = end_time
+
+    # Add the remaining audio after the last bad word
+    censored_audio += audio[previous_end_time:]
+
+    # Save the censored audio to the output file
+    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    print(f"Censored audio saved to {output_file}")
+
+def censor_with_instrumentals_and_downpitch(audio_file_path, bad_words, slurs, output_file="censored_output.mp3"):
+    """
+    Censors bad words by replacing vocal segments with instrumentals.
+    """
+     # Step 1: Separated vocals and instrumentals should be in their dir.
+    filename = audio_file_path.split('.')[0] # without extension
+    if all([os.path.exists(f'separated/{filename}/accompaniment.wav'), os.path.exists(f'separated/{filename}/vocals.wav')]):
+        instrumental_path = f'separated/{filename}/accompaniment.wav'
+        vocal_path = f'separated/{filename}/vocals.wav'
+    else:
+        print(f'Error! Separated files not found. Had the separator not worked firstly?')
+        exit()
+    
+    
+    
+    # Step 2: Transcribe vocals to find bad words
+    print(f'[+] Transcribe vocals to find bad words and slurs in Progress..')
+    both_timestamps = get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs)
+    bad_word_timestamps, slurs_timestamps = both_timestamps
+    
+    audio = AudioSegment.from_mp3(audio_file_path)
+    instrumental = AudioSegment.from_file(instrumental_path)
+    vocals = AudioSegment.from_file(vocal_path)
+
+    censored_audio = AudioSegment.empty()  # Start with an empty audio segment
+    previous_end_time = 0  # Keep track of the end of the last processed segment
+  
+    # Process each bad word segment
+    for start_time, end_time in sorted(bad_word_timestamps + slurs_timestamps):
+        # Add the audio before the bad word
+        if (start_time, end_time) in bad_word_timestamps:
+            censored_audio += audio[previous_end_time:start_time]
+            print(f"[+] Processing bad word segment: {start_time} ms to {end_time} ms")
+            # Reverse only the segment containing the bad word
+            censored_segment = instrumental[start_time:end_time]
+            censored_audio += censored_segment
+
+        else:
+            censored_audio += audio[previous_end_time:start_time]
+            print(f"[+] Processing slur segment: {start_time} ms to {end_time} ms")
+            # Reverse only the segment containing the bad word
+            censored_segment : AudioSegment = instrumental[start_time:end_time]
+
+            print(f"[-] Preparing current segment for down-pitch..")
+            cur_vocal_to_downpitch = vocals[start_time:end_time]
+            cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
+            print(f"[-] Calling downpitch... ")
+            
+            down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
+            print(f"[-] Mixing segment as censored...")
+            downpitched = AudioSegment.from_file('down_temp.mp3')
+            censored_audio += censored_segment.overlay(downpitched)
 
         # Update the end time of the last processed segment
         previous_end_time = end_time
@@ -208,6 +271,7 @@ def get_bad_word_timestamps(audio_file_path, bad_words):
     model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
     result = model.transcribe(audio_file_path, fp16=False)
     bad_word_timestamps = []
+    slurs_timestamps = []
     
     # Check for bad words in the segments
     print(f'[+] Bad words segmentation method running..')
@@ -218,6 +282,25 @@ def get_bad_word_timestamps(audio_file_path, bad_words):
             bad_word_timestamps.append((start_time, end_time))
 
     return bad_word_timestamps
+
+def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
+
+    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
+    result = model.transcribe(audio_file_path, fp16=False)
+    bad_word_timestamps = []
+    slurs_timestamps = []
+    
+    # Check for bad words in the segments
+    print(f'[+] Bad words segmentation method running..')
+    for segment in result['segments']:
+        start_time = int(segment['start'] * 1000)  # ms
+        end_time = int(segment['end'] * 1000)
+        if any(bad_word in segment['text'].lower() for bad_word in bad_words):
+            bad_word_timestamps.append((start_time, end_time))
+        if any(slur in segment['text'].lower() for slur in slurs):
+            slurs_timestamps.append((start_time, end_time))
+
+    return bad_word_timestamps, slurs_timestamps
 
 def print_transcribed_words(audio_file_path):
     # Transcribe the audio using Whisper
