@@ -92,13 +92,15 @@ async def censor_with_instrumentals(audio_file_path, bad_words, output_file="cen
     Censors bad words by replacing vocal segments with instrumentals.
     """
     instrumental_path = await get_separated_paths(audio_file_path)
-    if not instrumental_path:
-        print(f'Error! Separated instrumental not found. Had the separator not worked firstly?')
-        return
+    
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
+
+    if not instrumental_path:
+        print(f'Error! Separated instrumental not found. Had the separator not worked firstly?')
+        return
 
     audio = AudioSegment.from_mp3(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
@@ -130,13 +132,15 @@ async def censor_with_both(audio_file_path, bad_words, output_file="censored_out
     Censors bad words by reversing vocal segments with the song original instrumentals.
     """
     instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
-    if not (instrumental_path and vocal_path):
-        print(f'Error! Separated files not found. Had the separator not worked firstly?')
-        return
+    
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
+
+    if not (instrumental_path and vocal_path):
+        print(f'Error! Separated files not found. Had the separator not worked firstly?')
+        return
 
     audio = AudioSegment.from_mp3(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
@@ -169,13 +173,15 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
     Censors bad words by downpitching vocal segments with the song original instrumentals.
     """
     instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
-    if not (instrumental_path and vocal_path):
-        print(f'Error! Separated files not found. Had the separator not worked firstly?')
-        return
+   
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
+
+    if not (instrumental_path and vocal_path):
+        print(f'Error! Separated files not found. Had the separator not worked firstly?')
+        return
 
     audio = AudioSegment.from_mp3(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
@@ -224,6 +230,7 @@ async def censor_with_instrumentals_and_downpitch(audio_file_path, bad_words, sl
     bad_word_timestamps, slurs_timestamps = both_timestamps
     
     instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
+    
     if not (instrumental_path and vocal_path):
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
         return
