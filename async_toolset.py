@@ -278,6 +278,66 @@ async def censor_with_instrumentals_and_downpitch(audio_file_path, bad_words, sl
     censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
 
+async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, output_file="censored_output.mp3"):
+    """
+    Censors bad words by replacing vocal segments with instrumentals.
+    """
+    
+
+    # Step 2: Transcribe vocals to find bad words
+    print(f'[+] Transcribe vocals to find bad words and slurs in Progress..')
+    both_timestamps = await get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs)
+    bad_word_timestamps, slurs_timestamps = both_timestamps
+    
+    instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
+    
+    if not (instrumental_path and vocal_path):
+        print(f'Error! Separated files not found. Had the separator not worked firstly?')
+        return
+
+    audio = AudioSegment.from_mp3(audio_file_path)
+    instrumental = AudioSegment.from_file(instrumental_path)
+    vocals = AudioSegment.from_file(vocal_path)
+
+    censored_audio = AudioSegment.empty()  # Start with an empty audio segment
+    previous_end_time = 0  # Keep track of the end of the last processed segment
+  
+    # Process each bad word segment
+    for start_time, end_time in sorted(bad_word_timestamps + slurs_timestamps):
+        # Add the audio before the bad word
+        if (start_time, end_time) in bad_word_timestamps:
+            censored_audio += audio[previous_end_time:start_time]
+            print(f"[+] Processing bad word segment: {start_time} ms to {end_time} ms")
+            # Reverse only the segment containing the bad word
+            censored_segment : AudioSegment = instrumental[start_time:end_time]
+            censored_audio += censored_segment.overlay(vocals[start_time:end_time].reverse())
+
+        else:
+            censored_audio += audio[previous_end_time:start_time]
+            print(f"[+] Processing slur segment: {start_time} ms to {end_time} ms")
+            # Reverse only the segment containing the bad word
+            censored_segment : AudioSegment = instrumental[start_time:end_time]
+
+            print(f"[-] Preparing current segment for down-pitch..")
+            cur_vocal_to_downpitch = vocals[start_time:end_time]
+            cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
+            print(f"[-] Calling downpitch... ")
+            
+            await down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
+            print(f"[-] Mixing segment as censored...")
+            downpitched = AudioSegment.from_file('down_temp.mp3')
+            censored_audio += censored_segment.overlay(downpitched)
+
+        # Update the end time of the last processed segment
+        previous_end_time = end_time
+
+    # Add the remaining audio after the last bad word
+    censored_audio += audio[previous_end_time:]
+
+    # Save the censored audio to the output file
+    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    print(f"Censored audio saved to {output_file}")
+
 async def censor_with_backspin(audio_file_path, bad_words, output_file_path="censored_output.mp3"):
     # Oldest method in the book
     audio = AudioSegment.from_mp3(audio_file_path)
