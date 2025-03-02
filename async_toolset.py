@@ -87,7 +87,7 @@ async def get_separated_paths(audio_file_path, both=False):
         else:
             return None
 
-async def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_output.mp3"):
+async def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_output.mp3", sep_task : asyncio.Task = None):
     """
     Censors bad words by replacing vocal segments with instrumentals.
     """
@@ -127,13 +127,16 @@ async def censor_with_instrumentals(audio_file_path, bad_words, output_file="cen
     censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
 
-async def censor_with_both(audio_file_path, bad_words, output_file="censored_output.mp3"):
+async def censor_with_both(audio_file_path, bad_words, output_file="censored_output.mp3", sep_task : asyncio.Task = None):
     """
     Censors bad words by reversing vocal segments with the song original instrumentals.
     """
-    instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
+    instrumental_path, vocal_path = None,None
+    # Step 1: Block the code until the paths are found (from the separator simultaneously running thread)
+    while not sep_task.done():
+        await asyncio.sleep(1)
+        instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
     
-
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
@@ -142,7 +145,7 @@ async def censor_with_both(audio_file_path, bad_words, output_file="censored_out
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
         return
 
-    audio = AudioSegment.from_mp3(audio_file_path)
+    audio = AudioSegment.from_file(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
     vocals = AudioSegment.from_file(vocal_path)
 
@@ -165,15 +168,21 @@ async def censor_with_both(audio_file_path, bad_words, output_file="censored_out
     censored_audio += audio[previous_end_time:]
 
     # Save the censored audio to the output file
-    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    if audio_file_path.endswith(".wav"):
+        censored_audio.export(output_file, format="wav")
+    else:
+        censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
 
-async def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_output.mp3"):
+async def censor_with_downpitch(audio_file_path, bad_words, output_file="censored_output.mp3", sep_task : asyncio.Task = None):
     """
     Censors bad words by downpitching vocal segments with the song original instrumentals.
     """
-    instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
-   
+    instrumental_path, vocal_path = None,None
+    # Step 1: Block the code until the paths are found (from the separator simultaneously running thread)
+    while not sep_task.done():
+            await asyncio.sleep(1)
+            instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
@@ -183,7 +192,7 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
         return
 
-    audio = AudioSegment.from_mp3(audio_file_path)
+    audio = AudioSegment.from_file(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
     vocals = AudioSegment.from_file(vocal_path)
 
@@ -200,12 +209,12 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
 
         print(f"[-] Preparing current segment for down-pitch..")
         cur_vocal_to_downpitch = vocals[start_time:end_time]
-        cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
+        cur_vocal_to_downpitch.export('temp.wav',format="wav")
         print(f"[-] Calling downpitch... ")
         
-        await down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
+        await down_pitch('temp.wav','down_temp.wav',semitones=10) # 10 semi-tones should be enough to sound screwed.
         print(f"[-] Mixing segment as censored...")
-        downpitched = AudioSegment.from_file('down_temp.mp3')
+        downpitched = AudioSegment.from_file('down_temp.wav')
         censored_audio += censored_segment.overlay(downpitched)
 
         # Update the end time of the last processed segment
@@ -215,7 +224,10 @@ async def censor_with_downpitch(audio_file_path, bad_words, output_file="censore
     censored_audio += audio[previous_end_time:]
 
     # Save the censored audio to the output file
-    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    if audio_file_path.endswith(".wav"):
+        censored_audio.export(output_file, format="wav")
+    else:
+        censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
 
 async def censor_with_instrumentals_and_downpitch(audio_file_path, bad_words, slurs, output_file="censored_output.mp3"):
@@ -278,7 +290,7 @@ async def censor_with_instrumentals_and_downpitch(audio_file_path, bad_words, sl
     censored_audio.export(output_file, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file}")
 
-async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, output_file="censored_output.mp3"):
+async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, output_file="censored_output.mp3", sep_task : asyncio.Task = None):
     """
     Censors bad words by replacing vocal segments with instrumentals.
     """
@@ -320,12 +332,12 @@ async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, outp
 
             print(f"[-] Preparing current segment for down-pitch..")
             cur_vocal_to_downpitch = vocals[start_time:end_time]
-            cur_vocal_to_downpitch.export('temp.mp3',format="mp3",bitrate='320k')
+            cur_vocal_to_downpitch.export('temp.wav',format="wav")
             print(f"[-] Calling downpitch... ")
             
-            await down_pitch('temp.mp3','down_temp.mp3',semitones=10) # 10 semi-tones should be enough to sound screwed.
+            await down_pitch('temp.wav','down_temp.wav',semitones=10) # 10 semi-tones should be enough to sound screwed.
             print(f"[-] Mixing segment as censored...")
-            downpitched = AudioSegment.from_file('down_temp.mp3')
+            downpitched = AudioSegment.from_file('down_temp.wav')
             censored_audio += censored_segment.overlay(downpitched)
 
         # Update the end time of the last processed segment

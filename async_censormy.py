@@ -42,7 +42,7 @@ async def main():
     elif args.method == "vb":
         print("Using Async vocal + backspin method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
-        task2 = asyncio.create_task(run_in_thread(censor_with_both(args.audio_file, bad_words, args.output)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_both(args.audio_file, bad_words, args.output,sep_task=task1)))
         await asyncio.gather(task1, task2)
         
         
@@ -50,7 +50,7 @@ async def main():
     elif args.method == "p":
         print("Using Async vocal downpitch method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
-        task2 = asyncio.create_task(run_in_thread(censor_with_downpitch(args.audio_file, bad_words, args.output)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_downpitch(args.audio_file, bad_words, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
     
     
@@ -67,7 +67,7 @@ async def main():
         with open(args.slurs_file, "r") as f:
             slurs = [line.strip().lower() for line in f]
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
-        task2 = asyncio.create_task(run_in_thread(censor_with_both_and_downpitch(args.audio_file, bad_words, slurs, args.output)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_both_and_downpitch(args.audio_file, bad_words, slurs, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
        
     # End time
