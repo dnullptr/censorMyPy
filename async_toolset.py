@@ -307,7 +307,7 @@ async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, outp
         print(f'Error! Separated files not found. Had the separator not worked firstly?')
         return
 
-    audio = AudioSegment.from_mp3(audio_file_path)
+    audio = AudioSegment.from_file(audio_file_path)
     instrumental = AudioSegment.from_file(instrumental_path)
     vocals = AudioSegment.from_file(vocal_path)
 
@@ -347,7 +347,7 @@ async def censor_with_both_and_downpitch(audio_file_path, bad_words, slurs, outp
     censored_audio += audio[previous_end_time:]
 
     # Save the censored audio to the output file
-    censored_audio.export(output_file, format="mp3", bitrate='320k')
+    censored_audio.export(output_file, format="wav")
     print(f"Censored audio saved to {output_file}")
 
 async def censor_with_backspin(audio_file_path, bad_words, output_file_path="censored_output.mp3"):
@@ -393,8 +393,10 @@ async def print_transcribed_words(audio_file_path):
 
 async def cleanup():
     print(f'[=] Running clean-up..')
-    if os.path.exists('down_temp.mp3'):
-        os.remove('down_temp.mp3')
+    files = ['down_temp.wav','down_temp.mp3','temp.wav','temp.mp3']
+    for file in files:
+        if os.path.exists(file):
+            os.remove(file)
     if os.path.exists('separated'):
         rmtree('separated')
 
