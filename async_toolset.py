@@ -37,7 +37,17 @@ async def down_pitch(input_path, output_path, semitones):
 
 async def get_bad_word_timestamps(audio_file_path, bad_words):
     model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
-    result = model.transcribe(audio_file_path, fp16=False)
+    # if there's a file named after the audio_file_path but with an additional extension of json, return it instead.
+    # Should be in this format [[start, end1], [start2, end2], [start3, end3], ...] in milliseconds
+    
+    if os.path.exists(f'{audio_file_path}.json'):
+        print(f'[+] Using cached transcription from {audio_file_path}.json')
+        with open(f'{audio_file_path}.json', 'r') as f:
+            import json 
+            data = json.load(f) # data is a list of lists, that way it's easier to convert to tuples from the json file
+            return [tuple(item) for item in data] # convert to tuples to be readable by the rest of the algorithm(s)
+    else:
+        result = model.transcribe(audio_file_path, fp16=False)
     bad_word_timestamps = []
     
     # Check for bad words in the segments
@@ -87,7 +97,7 @@ async def get_separated_paths(audio_file_path, both=False):
         else:
             return None
 
-async def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_output.mp3", sep_task : asyncio.Task = None):
+async def censor_with_instrumentals(audio_file_path, bad_words, output_file="censored_output.mp3", sep_task : asyncio.Task = None, genai=False):
     """
     Censors bad words by replacing vocal segments with instrumentals.
     """
@@ -96,10 +106,21 @@ async def censor_with_instrumentals(audio_file_path, bad_words, output_file="cen
 
     # Step 2: Transcribe vocals to find bad words
     print(f'[+] Transcribe vocals to find bad words in Progress..')
-    bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
+    if genai:
+        bad_word_timestamps = await get_bad_word_timestamps_genai(audio_file_path, bad_words)
+    else:
+        bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
 
+   # Step 3: Block the code until the paths are found (from the separator simultaneously running thread)
+    # Wait up to 60 seconds for instrumental_path to become available
+    import time
+    timeout = 60  # seconds
+    start_time = time.time()
+    while instrumental_path is None:
+        await asyncio.sleep(1)
+        instrumental_path = await get_separated_paths(audio_file_path)
     if not instrumental_path:
-        print(f'Error! Separated instrumental not found. Had the separator not worked firstly?')
+        print(f'Error! Separated instrumental not found after waiting. Had the separator not worked firstly?')
         return
 
     audio = AudioSegment.from_mp3(audio_file_path)
@@ -390,6 +411,30 @@ async def print_transcribed_words(audio_file_path):
         end_time = segment['end']
         text = segment['text']
         print(f"From {start_time:.2f}s to {end_time:.2f}s: {text}")
+     
+async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
+    # Using GenAI for transcription and not Whisper
+    import json
+    import genai
+    bad_word_timestamps = []
+    
+   
+    # check if transcription.json exists, if not, print error and exit
+    if not os.path.exists('transcription.json'):
+        print(f'Error! transcription.json not found. Running transcription..')
+        await genai.transcribe_audio_file(audio_file_path, 'transcription.json')
+
+    with open('transcription.json', 'r') as f:
+        result = json.load(f)
+    # If your JSON has a list of words with 'start', 'end' (in ms), and 'text'
+    for word in result: 
+        word_text = word['text'].lower()
+        if any(bad_word in word_text for bad_word in bad_words):
+            start_time = int(word['start'])  # in sec
+            end_time = int(word['end'])      # in sec
+            bad_word_timestamps.append((start_time, end_time))
+
+    return bad_word_timestamps
 
 async def cleanup():
     print(f'[=] Running clean-up..')

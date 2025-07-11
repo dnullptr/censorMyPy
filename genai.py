@@ -203,5 +203,24 @@ def main():
         if uploaded_file_object:
             delete_uploaded_file(uploaded_file_object)
 
+# create another function to run the main function with parameters and without argaprse so i can call it a s a module froma  different script
+def transcribe_audio_file(file_path: str, output_path: str = None):
+    """
+    Transcribe an audio file using Gemini and save the result to a JSON file.
+    
+    :param file_path: Path to the audio file.
+    :param output_path: Optional path to save the transcription JSON
+    :return: Transcription data as a list of dicts or an error message.
+    """
+    configure_gemini()
+    uploaded_file_object = upload_audio_file(file_path)
+    transcription = transcribe_audio_with_gemini(uploaded_file_object)
+
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(transcription, f, indent=2, ensure_ascii=False)
+
+    return transcription
+
 if __name__ == "__main__":
     main()

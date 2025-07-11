@@ -1,6 +1,8 @@
 *.mp3
 *.wav
 *.flac
+*.mp3.json
+*.wav.json
 songs
 bad_words.txt
 lyrics.txt
@@ -13,3 +15,5 @@ __pycache__/async_toolset.cpython-310.pyc
 __pycache__/toolset.cpython-310.pyc
 slurs.txt
 test1.py
+transcription.json
+__pycache__/genai.cpython-310.pyc
