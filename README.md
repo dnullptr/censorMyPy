@@ -1,5 +1,6 @@
 # Censor My Py! [Music Censorship Tool]
-<p align="center"><img width="845" height="461" alt="cenpy" src="https://github.com/user-attachments/assets/14548d96-b23d-40e8-b7d4-b64e0ed95ee3" /></p>
+<p align="center"><img width="768" height="512" alt="20251221_2354_Python Music Censorship_remix_01kd1edwnyew2vcvtt3myst2mm" src="https://github.com/user-attachments/assets/5b0d6ea9-ff11-4051-bf7a-48996e23c701" />
+</p>
 
 This project is a Python-based tool that censors bad words in audio files by applying effects like reversing the audio or acapella separation at specific timestamps. It uses OpenAI's Whisper model to transcribe the audio, detect bad words based on a provided dictionary, and modify the audio accordingly.
 
