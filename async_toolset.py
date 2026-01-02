@@ -36,45 +36,100 @@ async def down_pitch(input_path, output_path, semitones):
     sf.write(output_path, y_shifted, sr)
 
 async def get_bad_word_timestamps(audio_file_path, bad_words):
-    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
-    # if there's a file named after the audio_file_path but with an additional extension of json, return it instead.
-    # Should be in this format [[start, end1], [start2, end2], [start3, end3], ...] in milliseconds
+    # Load model
+    model = whisper.load_model("large") 
     
+    # --- 1. CACHE HANDLER (Unchanged) ---
+    # Checks if a pre-calculated timestamp list exists
     if os.path.exists(f'{audio_file_path}.json'):
         print(f'[+] Using cached transcription from {audio_file_path}.json')
         with open(f'{audio_file_path}.json', 'r') as f:
-            import json 
-            data = json.load(f) # data is a list of lists, that way it's easier to convert to tuples from the json file
-            return [tuple(item) for item in data] # convert to tuples to be readable by the rest of the algorithm(s)
+            data = json.load(f) 
+            return [tuple(item) for item in data]
+            
+    # --- 2. TRANSCRIPTION (Updated) ---
     else:
-        result = model.transcribe(audio_file_path, fp16=False)
+        print(f'[+] Transcribing {audio_file_path} with word-level timestamps...')
+        # CRITICAL CHANGE: word_timestamps=True allows access to individual word timing
+        result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
+
     bad_word_timestamps = []
     
-    # Check for bad words in the segments
-    print(f'[+] Bad words segmentation method running..')
+    print(f'[+] Precision segmentation running...')
+
+    # --- 3. SURGICAL FILTERING (New Logic) ---
+    import string
     for segment in result['segments']:
-        start_time = int(segment['start'] * 1000)  # ms
-        end_time = int(segment['end'] * 1000)
-        if any(bad_word in segment['text'].lower() for bad_word in bad_words):
-            bad_word_timestamps.append((start_time, end_time))
+        # Dig into the 'words' list instead of just the segment text
+        for word_obj in segment['words']:
+            
+            # Extract the raw word string
+            raw_word = word_obj['word']
+            
+            # CLEANUP: 
+            # 1. Lowercase
+            # 2. Strip whitespace
+            # 3. Strip punctuation (so "sh*t!" becomes "sh*t")
+            clean_word = raw_word.lower().strip().strip(string.punctuation)
+            
+            # Check against your list
+            if clean_word in bad_words:
+                
+                # Convert to milliseconds (int)
+                start_time = int(word_obj['start'] * 1000)
+                end_time = int(word_obj['end'] * 1000)
+                
+                # Optional: Added a tiny buffer (50ms is enough) as the censor is too super accurate now lol
+                BUFFER_MS = 50
+                start_time = max(0, start_time - BUFFER_MS)
+                end_time = end_time + BUFFER_MS
+                
+                bad_word_timestamps.append((start_time, end_time))
+
 
     return bad_word_timestamps
 
 async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
-    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
-    result = model.transcribe(audio_file_path, fp16=False)
+    # Load model
+    model = whisper.load_model("large") 
+    
+    # Enable word_timestamps to get the "surgical" data
+    print(f'[+] Transcribing {audio_file_path} for bad words and slurs...')
+    result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
+    
     bad_word_timestamps = []
     slurs_timestamps = []
+
+    # Buffer settings (in milliseconds) - Adjust these if it feels too tight
+    BUFFER_MS = 50 
+    import string
     
-    # Check for bad words in the segments
-    print(f'[+] Bad words segmentation method running..')
+    print(f'[+] Precision segmentation running..')
+    
     for segment in result['segments']:
-        start_time = int(segment['start'] * 1000)  # ms
-        end_time = int(segment['end'] * 1000)
-        if any(bad_word in segment['text'].lower() for bad_word in bad_words):
-            bad_word_timestamps.append((start_time, end_time))
-        if any(slur in segment['text'].lower() for slur in slurs):
-            slurs_timestamps.append((start_time, end_time))
+        # Dig into the words list
+        for word_obj in segment['words']:
+            
+            # Clean the word (lowercase, strip whitespace, strip punctuation)
+            raw_word = word_obj['word']
+            clean_word = raw_word.lower().strip().strip(string.punctuation)
+            
+            # Get timestamps
+            start_time = int(word_obj['start'] * 1000)
+            end_time = int(word_obj['end'] * 1000)
+
+            # Apply buffer (padding)
+            # Ensure start_time doesn't go below 0
+            start_time = max(0, start_time - BUFFER_MS) 
+            end_time = end_time + BUFFER_MS
+            
+            # Check 1: Bad Words
+            if clean_word in bad_words:
+                bad_word_timestamps.append((start_time, end_time))
+            
+            # Check 2: Slurs (Independent check, so a word can technically be both)
+            if clean_word in slurs:
+                slurs_timestamps.append((start_time, end_time))
 
     return bad_word_timestamps, slurs_timestamps
 
@@ -402,15 +457,25 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
 
 async def print_transcribed_words(audio_file_path):
     # Transcribe the audio using Whisper
-    model = whisper.load_model("large")  # "small", "medium", "large" for better accuracy, I can use "base" but it's shitty
+    model = whisper.load_model("large") 
+    
+    # 1. Ensure word_timestamps is True
     result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
 
     print("Recognized words and their timestamps:")
+    
     for segment in result['segments']:
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
-        print(f"From {start_time:.2f}s to {end_time:.2f}s: {text}")
+        # Optional: Print the full sentence first so you know context
+        print(f"\n--- Segment: {segment['text'].strip()} ---")
+        
+        # 2. THE FIX: Iterate through the 'words' list inside the segment
+        for word_info in segment['words']:
+            start_time = word_info['start']
+            end_time = word_info['end']
+            text = word_info['word']
+            
+            # 3. Print the granular timestamps
+            print(f"   [{start_time:.2f}s -> {end_time:.2f}s]: {text}")
      
 async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
     # Using GenAI for transcription and not Whisper

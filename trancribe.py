@@ -1,5 +1,5 @@
 import asyncio
-from async_toolset import get_bad_word_and_slurs_timestamps,get_bad_word_timestamps
+from async_toolset import get_bad_word_and_slurs_timestamps,get_bad_word_timestamps,print_transcribed_words
 
 async def main():
     # Read bad words and slurs from files
@@ -9,8 +9,10 @@ async def main():
         slurs = [line.strip().lower() for line in f]
     
     # Call the async function
-    bad_word_timestamps = await get_bad_word_timestamps('bsx.mp3', bad_words)
-    print('Bad word timestamps:', bad_word_timestamps)
+    SONG_NAME = 'tate_signs.mp3'
+    #bad_word_timestamps = await get_bad_word_timestamps(SONG_NAME, bad_words)
+    #print('Bad word timestamps:', bad_word_timestamps)
+    await print_transcribed_words(SONG_NAME)
 
 if __name__ == "__main__":
     asyncio.run(main())

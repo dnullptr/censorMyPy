@@ -10,7 +10,7 @@ from pathlib import Path
 # or use a .env file with python-dotenv
 # For simplicity here, we'll check an environment variable.
 API_KEY = os.environ.get("GEMINI_API_KEY") 
-MODEL_NAME = "gemini-1.5-flash-latest" # Or "gemini-1.5-pro-latest" for potentially better quality
+MODEL_NAME = "gemini-2.5-flash"
 
 def configure_gemini():
     """Configures the Gemini API with the API key."""
