@@ -17,3 +17,6 @@ slurs.txt
 test1.py
 transcription.json
 __pycache__/genai.cpython-310.pyc
+fast_whisper_try.py
+__pycache__/async_toolset.cpython-312.pyc
+genai.py

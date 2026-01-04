@@ -1,11 +1,15 @@
 import os
 import whisper
 import librosa
+import torch
 import soundfile as sf
 import asyncio
+import string
+import json
 from pydub import AudioSegment
 from shutil import rmtree
 from module_context import ModuleContext
+from faster_whisper import WhisperModel
 
 
 async def separate_audio(input_audio_path, output_dir="separated"):
@@ -36,10 +40,7 @@ async def down_pitch(input_path, output_path, semitones):
     sf.write(output_path, y_shifted, sr)
 
 async def get_bad_word_timestamps(audio_file_path, bad_words):
-    # Load model
-    model = whisper.load_model("large") 
-    
-    # --- 1. CACHE HANDLER (Unchanged) ---
+    # 1. CACHE HANDLER
     # Checks if a pre-calculated timestamp list exists
     if os.path.exists(f'{audio_file_path}.json'):
         print(f'[+] Using cached transcription from {audio_file_path}.json')
@@ -47,89 +48,105 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
             data = json.load(f) 
             return [tuple(item) for item in data]
             
-    # --- 2. TRANSCRIPTION (Updated) ---
-    else:
-        print(f'[+] Transcribing {audio_file_path} with word-level timestamps...')
-        # CRITICAL CHANGE: word_timestamps=True allows access to individual word timing
-        result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
+    # 2. TRANSCRIPTION (Updated for Faster-Whisper)
+    print(f'[+] Transcribing {audio_file_path} with word-level timestamps (Faster Engine)...')
+    
+    model = WhisperModel(
+        "medium", 
+        device="cuda", 
+        compute_type="int8_float16"
+    )
+
+    segments, info = model.transcribe(
+        audio_file_path, 
+        word_timestamps=True,
+        beam_size=5
+    )
 
     bad_word_timestamps = []
-    
     print(f'[+] Precision segmentation running...')
 
-    # --- 3. SURGICAL FILTERING (New Logic) ---
-    import string
-    for segment in result['segments']:
-        # Dig into the 'words' list instead of just the segment text
-        for word_obj in segment['words']:
-            
-            # Extract the raw word string
-            raw_word = word_obj['word']
-            
-            # CLEANUP: 
-            # 1. Lowercase
-            # 2. Strip whitespace
-            # 3. Strip punctuation (so "sh*t!" becomes "sh*t")
-            clean_word = raw_word.lower().strip().strip(string.punctuation)
-            
-            # Check against your list
-            if clean_word in bad_words:
+    # 3. SURGICAL FILTERING
+    # Iterate through the generator segments as yielded by Faster-Whisper (I'll convert to list) 
+    for segment in segments:
+        # segment.words is a list of Word objects if word_timestamps=True
+        if segment.words:
+            for word_obj in segment.words:
                 
-                # Convert to milliseconds (int)
-                start_time = int(word_obj['start'] * 1000)
-                end_time = int(word_obj['end'] * 1000)
+                # Extract the raw word string
+                raw_word = word_obj.word
                 
-                # Optional: Added a tiny buffer (50ms is enough) as the censor is too super accurate now lol
-                BUFFER_MS = 50
-                start_time = max(0, start_time - BUFFER_MS)
-                end_time = end_time + BUFFER_MS
+                # CLEANUP: Lowercase, strip whitespace/punctuation
+                clean_word = raw_word.lower().strip().strip(string.punctuation)
                 
-                bad_word_timestamps.append((start_time, end_time))
-
+                # Check against your list
+                if clean_word in bad_words:
+                    
+                    # Convert seconds to milliseconds (int)
+                    start_time = int(word_obj.start * 1000)
+                    end_time = int(word_obj.end * 1000)
+                    
+                    # Buffer settings
+                    BUFFER_MS = 50
+                    start_time = max(0, start_time - BUFFER_MS)
+                    end_time = end_time + BUFFER_MS
+                    
+                    bad_word_timestamps.append((start_time, end_time))
 
     return bad_word_timestamps
 
 async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
-    # Load model
-    model = whisper.load_model("large") 
+    # 1. Load Faster-Whisper Model
+    # Using 'int8_float16' for massive VRAM savings (1.5GB-ish on 8GB GPU)
+    model = WhisperModel(
+        "medium", 
+        device="cuda", 
+        compute_type="int8_float16"
+    )
     
-    # Enable word_timestamps to get the "surgical" data
     print(f'[+] Transcribing {audio_file_path} for bad words and slurs...')
-    result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
+    
+    # 2. Run Transcription
+    # word_timestamps=True is mandatory for the 'surgical' data you need
+    segments, info = model.transcribe(
+        audio_file_path, 
+        word_timestamps=True,
+        beam_size=5
+    )
     
     bad_word_timestamps = []
     slurs_timestamps = []
 
-    # Buffer settings (in milliseconds) - Adjust these if it feels too tight
-    BUFFER_MS = 50 
-    import string
+    # Buffer settings (in milliseconds)
+    BUFFER_MS = 85 
     
-    print(f'[+] Precision segmentation running..')
+    print(f'[+] Precision segmentation running (Faster-Whisper Engine)...')
     
-    for segment in result['segments']:
-        # Dig into the words list
-        for word_obj in segment['words']:
-            
-            # Clean the word (lowercase, strip whitespace, strip punctuation)
-            raw_word = word_obj['word']
-            clean_word = raw_word.lower().strip().strip(string.punctuation)
-            
-            # Get timestamps
-            start_time = int(word_obj['start'] * 1000)
-            end_time = int(word_obj['end'] * 1000)
+    # 3. Iterate through segments
+    for segment in segments:
+        # In faster-whisper, segment.words is available if word_timestamps=True
+        if segment.words:
+            for word_obj in segment.words:
+                
+                # Clean the word
+                raw_word = word_obj.word
+                clean_word = raw_word.lower().strip().strip(string.punctuation)
+                
+                # Get timestamps (faster-whisper provides these in seconds as floats)
+                start_time = int(word_obj.start * 1000)
+                end_time = int(word_obj.end * 1000)
 
-            # Apply buffer (padding)
-            # Ensure start_time doesn't go below 0
-            start_time = max(0, start_time - BUFFER_MS) 
-            end_time = end_time + BUFFER_MS
-            
-            # Check 1: Bad Words
-            if clean_word in bad_words:
-                bad_word_timestamps.append((start_time, end_time))
-            
-            # Check 2: Slurs (Independent check, so a word can technically be both)
-            if clean_word in slurs:
-                slurs_timestamps.append((start_time, end_time))
+                # Apply buffer (padding)
+                start_time = max(0, start_time - BUFFER_MS) 
+                end_time = end_time + BUFFER_MS
+                
+                # Check 1: Bad Words
+                if clean_word in bad_words:
+                    bad_word_timestamps.append((start_time, end_time))
+                
+                # Check 2: Slurs
+                if clean_word in slurs:
+                    slurs_timestamps.append((start_time, end_time))
 
     return bad_word_timestamps, slurs_timestamps
 
@@ -456,26 +473,41 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
     print(f"Censored audio saved to {output_file_path}")
 
 async def print_transcribed_words(audio_file_path):
-    # Transcribe the audio using Whisper
-    model = whisper.load_model("large") 
+    # Load model with high-performance int8_float16 quantization
+    model = WhisperModel(
+        "medium", 
+        device="cuda", 
+        compute_type="int8_float16"
+    )
     
-    # 1. Ensure word_timestamps is True
-    result = model.transcribe(audio_file_path, fp16=False, word_timestamps=True)
+    print(f"[#] Debug: Transcribing {audio_file_path} (Faster Engine)")
+    
+    # 1. Faster-Whisper returns a generator of segments
+    segments, info = model.transcribe(
+        audio_file_path, 
+        word_timestamps=True,
+        beam_size=5
+    )
 
     print("Recognized words and their timestamps:")
     
-    for segment in result['segments']:
-        # Optional: Print the full sentence first so you know context
-        print(f"\n--- Segment: {segment['text'].strip()} ---")
+    # 2. Iterate through the generator
+    for segment in segments:
+        # Print the full segment text for context
+        print(f"\n--- Segment: {segment.text.strip()} ---")
         
-        # 2. THE FIX: Iterate through the 'words' list inside the segment
-        for word_info in segment['words']:
-            start_time = word_info['start']
-            end_time = word_info['end']
-            text = word_info['word']
-            
-            # 3. Print the granular timestamps
-            print(f"   [{start_time:.2f}s -> {end_time:.2f}s]: {text}")
+        # 3. Access 'words' attribute (only exists if word_timestamps=True)
+        if segment.words:
+            for word_info in segment.words:
+                # Note: Attributes are accessed with dot notation, not brackets
+                start_time = word_info.start
+                end_time = word_info.end
+                text = word_info.word
+                
+                # 4. Print the granular timestamps
+                print(f"   [{start_time:.2f}s -> {end_time:.2f}s]: {text}")
+
+    print("\n[#] Debug: End of transcription.")
      
 async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
     # Using GenAI for transcription and not Whisper
@@ -483,7 +515,7 @@ async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
     import genai
     bad_word_timestamps = []
     
-   
+    print(f'[+] GenAI toolset bridge function running..')
     # check if transcription.json exists, if not, print error and exit
     if not os.path.exists('transcription.json'):
         print(f'Error! transcription.json not found. Running transcription..')

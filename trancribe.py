@@ -9,7 +9,7 @@ async def main():
         slurs = [line.strip().lower() for line in f]
     
     # Call the async function
-    SONG_NAME = 'tate_signs.mp3'
+    SONG_NAME = 'good_comf.mp3'
     #bad_word_timestamps = await get_bad_word_timestamps(SONG_NAME, bad_words)
     #print('Bad word timestamps:', bad_word_timestamps)
     await print_transcribed_words(SONG_NAME)

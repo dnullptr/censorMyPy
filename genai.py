@@ -212,6 +212,7 @@ def transcribe_audio_file(file_path: str, output_path: str = None):
     :param output_path: Optional path to save the transcription JSON
     :return: Transcription data as a list of dicts or an error message.
     """
+    print(f"GenAI method running for audio file: {file_path}..")
     configure_gemini()
     uploaded_file_object = upload_audio_file(file_path)
     transcription = transcribe_audio_with_gemini(uploaded_file_object)
