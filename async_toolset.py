@@ -154,7 +154,8 @@ async def get_separated_paths(audio_file_path, both=False):
     """
     Get the paths for separated instrumental and vocal files.
     """
-    filename = audio_file_path.split('.')[0]  # without extension
+    import os
+    filename = os.path.splitext(os.path.basename(audio_file_path))[0]  # without extension
     instrumental_path = f'separated/{filename}/accompaniment.wav'
     vocal_path = f'separated/{filename}/vocals.wav'
 
