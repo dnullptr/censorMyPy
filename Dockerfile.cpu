@@ -1,5 +1,5 @@
-# Use NVIDIA CUDA base image for GPU support
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+# CPU-only version (no GPU support)
+FROM ubuntu:22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -26,7 +26,7 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements_clean.txt .
 
-# Install Python dependencies
+# Install Python dependencies (CPU versions)
 RUN pip install --no-cache-dir -r requirements_clean.txt
 
 # Copy application code

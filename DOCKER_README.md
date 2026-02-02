@@ -91,10 +91,23 @@ censorMyPy/
 
 ### Common Issues
 
-1. **GPU Not Detected**
+1. **CUDA Image Not Found**
+   ```bash
+   # The Dockerfile uses nvidia/cuda:12.1-runtime-ubuntu22.04
+   # If this fails, try alternative CUDA versions:
+   # nvidia/cuda:11.8-runtime-ubuntu20.04
+   # nvidia/cuda:12.0-runtime-ubuntu22.04
+   # nvidia/cuda:11.7-runtime-ubuntu20.04
+
+   # Or use CPU-only version:
+   cp Dockerfile.cpu Dockerfile
+   docker-compose up --build
+   ```
+
+2. **GPU Not Detected**
    ```bash
    # Check NVIDIA Docker installation
-   docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
+   docker run --rm --gpus all nvidia/cuda:12.1-runtime-ubuntu22.04 nvidia-smi
 
    # Ensure NVIDIA runtime is configured in Docker
    ```
