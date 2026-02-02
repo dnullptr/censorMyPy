@@ -42,11 +42,17 @@ async def down_pitch(input_path, output_path, semitones):
 async def get_bad_word_timestamps(audio_file_path, bad_words):
     # 1. CACHE HANDLER
     # Checks if a pre-calculated timestamp list exists
-    if os.path.exists(f'{audio_file_path}.json'):
-        print(f'[+] Using cached transcription from {audio_file_path}.json')
-        with open(f'{audio_file_path}.json', 'r') as f:
-            data = json.load(f) 
-            return [tuple(item) for item in data]
+    def _check_cache():
+        if os.path.exists(f'{audio_file_path}.json'):
+            print(f'[+] Using cached transcription from {audio_file_path}.json')
+            with open(f'{audio_file_path}.json', 'r') as f:
+                data = json.load(f) 
+                return [tuple(item) for item in data]
+        return None
+    
+    cached_timestamps = _check_cache()
+    if cached_timestamps is not None:
+        return cached_timestamps
             
     # 2. TRANSCRIPTION (Updated for Faster-Whisper)
     print(f'[+] Transcribing {audio_file_path} with word-level timestamps (Faster Engine)...')
@@ -58,7 +64,7 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
     )
 
     segments, info = model.transcribe(
-        audio_file_path, 
+        audio_file_path,
         word_timestamps=True,
         beam_size=5
     )
@@ -67,86 +73,123 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
     print(f'[+] Precision segmentation running...')
 
     # 3. SURGICAL FILTERING
-    # Iterate through the generator segments as yielded by Faster-Whisper (I'll convert to list) 
-    for segment in segments:
+    # Convert generator to list to consume it completely before cleanup
+    segments_list = list(segments)
+    for segment in segments_list:
         # segment.words is a list of Word objects if word_timestamps=True
         if segment.words:
             for word_obj in segment.words:
-                
+
                 # Extract the raw word string
                 raw_word = word_obj.word
-                
+
                 # CLEANUP: Lowercase, strip whitespace/punctuation
                 clean_word = raw_word.lower().strip().strip(string.punctuation)
-                
+
                 # Check against your list
                 if clean_word in bad_words:
-                    
+
                     # Convert seconds to milliseconds (int)
                     start_time = int(word_obj.start * 1000)
                     end_time = int(word_obj.end * 1000)
-                    
+
                     # Buffer settings
-                    BUFFER_MS = 50
+                    BUFFER_MS = 85
                     start_time = max(0, start_time - BUFFER_MS)
                     end_time = end_time + BUFFER_MS
-                    
+
                     bad_word_timestamps.append((start_time, end_time))
 
-    return bad_word_timestamps
+    # Save the results to JSON for caching
+    with open(f'{audio_file_path}.json', 'w') as f:
+        json.dump(bad_word_timestamps, f)
+    print(f'[+] Saved transcription cache to {audio_file_path}.json')
+
+    # Clean up model to free GPU memory
+    del model
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # return the first of _check_cache() | bad_word_timestamps that is not None
+    return _check_cache() or bad_word_timestamps
 
 async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
-    # 1. Load Faster-Whisper Model
+    # 1. CACHE HANDLER
+    # Checks if a pre-calculated timestamp list exists
+    cache_file = f'{audio_file_path}_bad_slurs.json'
+    if os.path.exists(cache_file):
+        print(f'[+] Using cached transcription from {cache_file}')
+        with open(cache_file, 'r') as f:
+            data = json.load(f)
+            return [tuple(item) for item in data['bad_words']], [tuple(item) for item in data['slurs']]
+
+    # 2. Load Faster-Whisper Model
     # Using 'int8_float16' for massive VRAM savings (1.5GB-ish on 8GB GPU)
     model = WhisperModel(
-        "medium", 
-        device="cuda", 
+        "medium",
+        device="cuda",
         compute_type="int8_float16"
     )
-    
+
     print(f'[+] Transcribing {audio_file_path} for bad words and slurs...')
-    
-    # 2. Run Transcription
+
+    # 3. Run Transcription
     # word_timestamps=True is mandatory for the 'surgical' data you need
     segments, info = model.transcribe(
-        audio_file_path, 
+        audio_file_path,
         word_timestamps=True,
         beam_size=5
     )
-    
+
     bad_word_timestamps = []
     slurs_timestamps = []
 
     # Buffer settings (in milliseconds)
-    BUFFER_MS = 85 
-    
+    BUFFER_MS = 85
+
     print(f'[+] Precision segmentation running (Faster-Whisper Engine)...')
-    
-    # 3. Iterate through segments
+
+    # 4. Iterate through segments
     for segment in segments:
         # In faster-whisper, segment.words is available if word_timestamps=True
         if segment.words:
             for word_obj in segment.words:
-                
+
                 # Clean the word
                 raw_word = word_obj.word
                 clean_word = raw_word.lower().strip().strip(string.punctuation)
-                
+
                 # Get timestamps (faster-whisper provides these in seconds as floats)
                 start_time = int(word_obj.start * 1000)
                 end_time = int(word_obj.end * 1000)
 
                 # Apply buffer (padding)
-                start_time = max(0, start_time - BUFFER_MS) 
+                start_time = max(0, start_time - BUFFER_MS)
                 end_time = end_time + BUFFER_MS
-                
+
                 # Check 1: Bad Words
                 if clean_word in bad_words:
                     bad_word_timestamps.append((start_time, end_time))
-                
+
                 # Check 2: Slurs
                 if clean_word in slurs:
                     slurs_timestamps.append((start_time, end_time))
+
+    # Save the results to JSON for caching
+    cache_data = {
+        'bad_words': bad_word_timestamps,
+        'slurs': slurs_timestamps
+    }
+    with open(cache_file, 'w') as f:
+        json.dump(cache_data, f)
+    print(f'[+] Saved transcription cache to {cache_file}')
+
+    # Clean up model to free GPU memory
+    del model
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return bad_word_timestamps, slurs_timestamps
 

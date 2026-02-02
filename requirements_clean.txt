@@ -1,0 +1,52 @@
+# Core dependencies
+torch>=2.0.0
+torchvision
+torchaudio
+tensorflow>=2.9.0
+faster-whisper>=0.10.0
+openai-whisper>=20231117
+librosa>=0.10.0
+numpy>=1.21.0
+scipy>=1.7.0
+soundfile>=0.10.0
+pydub>=0.25.0
+spleeter>=2.4.0
+ffmpeg-python>=0.2.0
+
+# Web framework
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Utilities
+asyncio-mqtt
+python-multipart
+jinja2
+werkzeug
+click
+argparse
+string
+json
+os
+sys
+
+# Audio processing
+audioread
+soxr
+pooch
+
+# ML/AI
+keras
+scikit-learn
+pandas
+networkx
+
+# HTTP and API
+requests
+httpx
+google-generativeai
+google-api-python-client
+
+# Development
+pytest
+black
+flake8
