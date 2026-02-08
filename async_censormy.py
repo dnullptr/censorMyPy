@@ -37,8 +37,8 @@ async def main():
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
         task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals(args.audio_file, bad_words, args.output, genai=True)))
         await asyncio.gather(task1, task2)    
-
-    elif args.method == "b":
+    
+    elif args.method == "b": # Oldest method in the book, doesn't require vocal separationS
         print("Using Async backspin method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
         task2 = asyncio.create_task(run_in_thread(censor_with_backspin(args.audio_file, bad_words, args.output)))

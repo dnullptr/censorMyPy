@@ -6,7 +6,7 @@ pydub
 ffmpeg-python
 audioread
 spleeter
-
+tensorrt
 # --- Utilities ---
 click
 tqdm

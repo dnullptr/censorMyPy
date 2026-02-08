@@ -25,6 +25,7 @@ COPY requirements_clean.txt .
 # כאן הקסם: אנחנו אומרים ל-pip לא להשתגע עם תלויות
 RUN pip install --no-cache-dir -r requirements_clean.txt
 
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib/python3.10/dist-packages/tensorrt_libs"
 COPY . .
 
 # אין צורך ב-EXPOSE אם אתה לא מריץ שרת
