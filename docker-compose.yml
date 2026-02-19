@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "8000:8000"
+      - "7860:7860"
     volumes:
       - ./uploads:/app/uploads
       - .:/app
