@@ -24,3 +24,6 @@ __pycache__/module_context.cpython-312.pyc
 TODO.md
 *_bad_slurs.json
 .gradio/certificate.pem
+async_toolset_new_get_bad_word_and_slurs.txt
+__pycache__/async_toolset.cpython-314.pyc
+async_toolset_new_get_bad_word.txt

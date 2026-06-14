@@ -49,14 +49,14 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
                 data = json.load(f) 
                 return [tuple(item) for item in data]
         return None
-    
+
     cached_timestamps = _check_cache()
     if cached_timestamps is not None:
         return cached_timestamps
-            
+
     # 2. TRANSCRIPTION (Updated for Faster-Whisper)
     print(f'[+] Transcribing {audio_file_path} with word-level timestamps (Faster Engine)...')
-    
+
     model = WhisperModel(
         "medium", 
         device="cuda", 
@@ -69,49 +69,92 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
         beam_size=5
     )
 
-    bad_word_timestamps = []
-    print(f'[+] Precision segmentation running...')
-
-    # 3. SURGICAL FILTERING
+    # 3. PREPROCESS WORDS
     # Convert generator to list to consume it completely before cleanup
     segments_list = list(segments)
+    all_words = []   # each element: {'raw': str, 'clean': str, 'start': float, 'end': float}
     for segment in segments_list:
-        # segment.words is a list of Word objects if word_timestamps=True
         if segment.words:
             for word_obj in segment.words:
-
-                # Extract the raw word string
                 raw_word = word_obj.word
-
-                # CLEANUP: Lowercase, strip whitespace/punctuation
                 clean_word = raw_word.lower().strip().strip(string.punctuation)
+                all_words.append({
+                    'raw': raw_word,
+                    'clean': clean_word,
+                    'start': word_obj.start,
+                    'end': word_obj.end
+                })
 
-                # Check against your list
-                if clean_word in bad_words:
+    # 4. PREPROCESS BAD WORDS: split each bad word into tokens (cleaned similarly)
+    bad_phrases = []
+    for phrase in bad_words:
+        clean_phrase = phrase.lower().strip().strip(string.punctuation)
+        tokens = clean_phrase.split()
+        if tokens:  # ignore empty phrases
+            bad_phrases.append(tokens)
 
-                    # Convert seconds to milliseconds (int)
-                    start_time = int(word_obj.start * 1000)
-                    end_time = int(word_obj.end * 1000)
+    # 5. FIND PHRASE MATCHES
+    n = len(all_words)
+    intervals = []   # list of (start_idx, end_idx) in word indices
 
-                    # Buffer settings
-                    BUFFER_MS = 85
-                    start_time = max(0, start_time - BUFFER_MS)
-                    end_time = end_time + BUFFER_MS
+    for i in range(n):
+        for tokens in bad_phrases:
+            L = len(tokens)
+            if i + L > n:
+                continue
+            # Check if the next L words match the tokens
+            match = True
+            for j in range(L):
+                if all_words[i+j]['clean'] != tokens[j]:
+                    match = False
+                    break
+            if match:
+                intervals.append( (i, i+L-1) )
 
-                    bad_word_timestamps.append((start_time, end_time))
+    # 6. CONVERT WORD INDICES TO TIME INTERVALS WITH BUFFER
+    BUFFER_MS = 85   # same as before
+    time_intervals = []
+    for (start_idx, end_idx) in intervals:
+        start_time = all_words[start_idx]['start']
+        end_time   = all_words[end_idx]['end']
+        # Convert to milliseconds and apply buffer
+        start_time_ms = int(start_time * 1000) - BUFFER_MS
+        end_time_ms   = int(end_time   * 1000) + BUFFER_MS
+        if start_time_ms < 0:
+            start_time_ms = 0
+        time_intervals.append( (start_time_ms, end_time_ms) )
 
-    # Save the results to JSON for caching
+    # 7. MERGE OVERLAPPING OR ADJACENT INTERVALS
+    if not time_intervals:
+        bad_word_timestamps = []
+    else:
+        # Sort by start time
+        time_intervals.sort(key=lambda x: x[0])
+        merged = []
+        current_start, current_end = time_intervals[0]
+        for i in range(1, len(time_intervals)):
+            s, e = time_intervals[i]
+            if s <= current_end:   # overlapping or adjacent
+                if e > current_end:
+                    current_end = e
+            else:
+                merged.append( (current_start, current_end) )
+                current_start, current_end = s, e
+        merged.append( (current_start, current_end) )
+        bad_word_timestamps = merged
+
+    # 8. SAVE THE RESULTS TO JSON FOR CACHING
     with open(f'{audio_file_path}.json', 'w') as f:
         json.dump(bad_word_timestamps, f)
     print(f'[+] Saved transcription cache to {audio_file_path}.json')
 
-    # Clean up model to free GPU memory
+    # 9. CLEAN UP MODEL TO FREE GPU MEMORY
     del model
     import torch
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # return the first of _check_cache() | bad_word_timestamps that is not None
+    # 10. RETURN THE TIMESTAMPS
     return _check_cache() or bad_word_timestamps
 
 async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
@@ -142,56 +185,122 @@ async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
         beam_size=5
     )
 
-    bad_word_timestamps = []
-    slurs_timestamps = []
-
-    # Buffer settings (in milliseconds)
-    BUFFER_MS = 85
-
-    print(f'[+] Precision segmentation running (Faster-Whisper Engine)...')
-
-    # 4. Iterate through segments
-    for segment in segments:
-        # In faster-whisper, segment.words is available if word_timestamps=True
+    # 4. PREPROCESS WORDS
+    segments_list = list(segments)
+    all_words = []   # each element: {'raw': str, 'clean': str, 'start': float, 'end': float}
+    for segment in segments_list:
         if segment.words:
             for word_obj in segment.words:
-
-                # Clean the word
                 raw_word = word_obj.word
                 clean_word = raw_word.lower().strip().strip(string.punctuation)
+                all_words.append({
+                    'raw': raw_word,
+                    'clean': clean_word,
+                    'start': word_obj.start,
+                    'end': word_obj.end
+                })
 
-                # Get timestamps (faster-whisper provides these in seconds as floats)
-                start_time = int(word_obj.start * 1000)
-                end_time = int(word_obj.end * 1000)
+    # 5. PREPROCESS BAD WORDS AND SLURS: split each into tokens (cleaned similarly)
+    def preprocess_terms(terms):
+        phrases = []
+        for term in terms:
+            clean_term = term.lower().strip().strip(string.punctuation)
+            tokens = clean_term.split()
+            if tokens:  # ignore empty terms
+                phrases.append(tokens)
+        return phrases
 
-                # Apply buffer (padding)
-                start_time = max(0, start_time - BUFFER_MS)
-                end_time = end_time + BUFFER_MS
+    bad_phrases = preprocess_terms(bad_words)
+    slur_phrases = preprocess_terms(slurs)
 
-                # Check 1: Bad Words
-                if clean_word in bad_words:
-                    bad_word_timestamps.append((start_time, end_time))
+    # 6. FIND PHRASE MATCHES FOR BAD WORDS AND SLURS SEPARATELY
+    n = len(all_words)
+    bad_intervals = []   # list of (start_idx, end_idx) for bad words
+    slur_intervals = []  # list of (start_idx, end_idx) for slurs
 
-                # Check 2: Slurs
-                if clean_word in slurs:
-                    slurs_timestamps.append((start_time, end_time))
+    for i in range(n):
+        # Check bad words
+        for tokens in bad_phrases:
+            L = len(tokens)
+            if i + L > n:
+                continue
+            match = True
+            for j in range(L):
+                if all_words[i+j]['clean'] != tokens[j]:
+                    match = False
+                    break
+            if match:
+                bad_intervals.append( (i, i+L-1) )
+        # Check slurs
+        for tokens in slur_phrases:
+            L = len(tokens)
+            if i + L > n:
+                continue
+            match = True
+            for j in range(L):
+                if all_words[i+j]['clean'] != tokens[j]:
+                    match = False
+                    break
+            if match:
+                slur_intervals.append( (i, i+L-1) )
 
-    # Save the results to JSON for caching
+    # 7. CONVERT WORD INDICES TO TIME INTERVALS WITH BUFFER
+    BUFFER_MS = 85   # same as before
+    def convert_intervals(intervals):
+        time_intervals = []
+        for (start_idx, end_idx) in intervals:
+            start_time = all_words[start_idx]['start']
+            end_time   = all_words[end_idx]['end']
+            # Convert to milliseconds and apply buffer
+            start_time_ms = int(start_time * 1000) - BUFFER_MS
+            end_time_ms   = int(end_time   * 1000) + BUFFER_MS
+            if start_time_ms < 0:
+                start_time_ms = 0
+            time_intervals.append( (start_time_ms, end_time_ms) )
+        return time_intervals
+
+    bad_time_intervals = convert_intervals(bad_intervals)
+    slur_time_intervals = convert_intervals(slur_intervals)
+
+    # 8. MERGE OVERLAPPING OR ADJACENT INTERVALS FOR EACH LIST
+    def merge_intervals(intervals):
+        if not intervals:
+            return []
+        # Sort by start time
+        intervals.sort(key=lambda x: x[0])
+        merged = []
+        current_start, current_end = intervals[0]
+        for i in range(1, len(intervals)):
+            s, e = intervals[i]
+            if s <= current_end:   # overlapping or adjacent
+                if e > current_end:
+                    current_end = e
+            else:
+                merged.append( (current_start, current_end) )
+                current_start, current_end = s, e
+        merged.append( (current_start, current_end) )
+        return merged
+
+    merged_bad = merge_intervals(bad_time_intervals)
+    merged_slur = merge_intervals(slur_time_intervals)
+
+    # 9. SAVE THE RESULTS TO JSON FOR CACHING
     cache_data = {
-        'bad_words': bad_word_timestamps,
-        'slurs': slurs_timestamps
+        'bad_words': merged_bad,
+        'slurs': merged_slur
     }
     with open(cache_file, 'w') as f:
         json.dump(cache_data, f)
     print(f'[+] Saved transcription cache to {cache_file}')
 
-    # Clean up model to free GPU memory
+    # 10. CLEAN UP MODEL TO FREE GPU MEMORY
     del model
     import torch
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return bad_word_timestamps, slurs_timestamps
+    # 11. RETURN THE TIMESTAMPS
+    return merged_bad, merged_slur
 
 async def get_separated_paths(audio_file_path, both=False):
     """
