@@ -59,13 +59,12 @@ async def main():
         task2 = asyncio.create_task(run_in_thread(censor_with_downpitch(args.audio_file, bad_words, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
     
-    
     elif args.method == "sv":
         print("Using Async Slur + Vocal method...")
         with open(args.slurs_file, "r") as f:
             slurs = [line.strip().lower() for line in f]
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
-        task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals_and_downpitch(args.audio_file, bad_words, slurs, args.output)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals_and_downpitch(args.audio_file, bad_words, slurs, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
 
     elif args.method == "sb":

@@ -27,3 +27,6 @@ TODO.md
 async_toolset_new_get_bad_word_and_slurs.txt
 __pycache__/async_toolset.cpython-314.pyc
 async_toolset_new_get_bad_word.txt
+trancribe.py
+__pycache__/async_censormy.cpython-314.pyc
+__pycache__/gradio_app.cpython-314.pyc

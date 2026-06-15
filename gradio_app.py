@@ -81,7 +81,11 @@ async def process_audio(
     
     # Set default output filename if not provided
     if not output_filename.strip():
-        output_filename = "censored_output.mp3"
+        # Get the extension of the input file
+        _, ext = os.path.splitext(audio_file)
+        if not ext:
+            ext = '.mp3'
+        output_filename = f"censored_output{ext}"
     
     # Ensure output directory exists
     output_dir = "outputs"
@@ -125,7 +129,7 @@ async def process_audio(
         elif method == "sv":
             status = "🎵 Using Slur + Vocal method..."
             task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
-            task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals_and_downpitch(audio_file, bad_words, slurs, output_path)))
+            task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals_and_downpitch(audio_file, bad_words, slurs, output_path, sep_task=task1)))
             await asyncio.gather(task1, task2)
         
         elif method == "sb":
