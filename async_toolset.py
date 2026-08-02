@@ -648,19 +648,17 @@ def apply_tape_stop_effect(
     segment: AudioSegment,
     fade_in_ms: int = 5,
     fade_out_ms: int = 15,
-    speed_end: float = 0.25,
-    curve_exponent: float = 1.5
+    speed_end: float = 0.20,
+    curve_exponent: float = 1.2
 ) -> AudioSegment:
     """
-    Applies a fluent, musical DJ Tape Stop / Vinyl Break pitch-drop effect
+    Applies a fluent DJ Tape Stop / Vinyl Break deceleration effect
     to an AudioSegment buffer, supporting both Mono and Stereo channels.
-    Includes gain normalization to prevent volume boosting/clipping,
-    and micro fade-in/fade-out for smooth transitions.
+    Includes gain normalization and micro fade-in/fade-out.
     """
     if len(segment) == 0:
         return segment
 
-    # Extract raw PCM samples as float64 for high precision processing
     orig_raw = np.array(segment.get_array_of_samples())
     samples = orig_raw.astype(np.float64)
     num_channels = segment.channels
@@ -672,25 +670,19 @@ def apply_tape_stop_effect(
     if num_frames < 2:
         return segment
 
-    # Calculate input peak to preserve natural volume level without boosting/clipping
     orig_peak = np.max(np.abs(samples))
     if orig_peak == 0:
         return segment
 
-    # Normalized time u in [0, 1]
     u = np.linspace(0.0, 1.0, num_frames)
 
-    # Smooth curve for speed decay from 1.0 down to speed_end
-    # speed(u) = 1.0 - (1.0 - speed_end) * (u ** curve_exponent)
     p = curve_exponent + 1.0
     phi = u - ((1.0 - speed_end) / p) * (u ** p)
     phi_max = 1.0 - ((1.0 - speed_end) / p)
 
-    # Map position to input sample indices
     in_indices = np.arange(num_frames, dtype=np.float64)
     out_indices = (num_frames - 1) * (phi / phi_max)
 
-    # Interpolate samples for mono / stereo
     if num_channels == 1:
         out_samples = np.interp(out_indices, in_indices, samples)
     else:
@@ -698,12 +690,10 @@ def apply_tape_stop_effect(
         for c in range(num_channels):
             out_samples[:, c] = np.interp(out_indices, in_indices, samples[:, c])
 
-    # Normalize output gain so peak matches original segment level (prevents volume boost)
     out_peak = np.max(np.abs(out_samples))
     if out_peak > 0:
         out_samples = out_samples * (orig_peak / out_peak)
 
-    # Convert back to original integer dtype safely
     if np.issubdtype(orig_raw.dtype, np.integer):
         info = np.iinfo(orig_raw.dtype)
         out_samples = np.clip(out_samples, info.min, info.max).astype(orig_raw.dtype)
@@ -720,9 +710,8 @@ def apply_tape_stop_effect(
         channels=segment.channels
     )
 
-    # Apply micro fade-in & fade-out for smooth, pop-free transitions
     if fade_in_ms > 0 and len(tape_stopped) > fade_in_ms:
-        tape_stopped = tape_stopped.fade_in(duration=fade_in_ms)
+        tape_stopped = tape_stopped.fade_out(duration=fade_in_ms).fade_in(duration=fade_in_ms)
     if fade_out_ms > 0 and len(tape_stopped) > fade_out_ms:
         tape_stopped = tape_stopped.fade_out(duration=fade_out_ms)
 
@@ -730,8 +719,8 @@ def apply_tape_stop_effect(
 
 async def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="censored_output.mp3", sep_task: asyncio.Task = None):
     """
-    Censors bad words by applying a dynamic Tape Stop / Vinyl Break pitch-drop effect.
-    If vocal separation stems are available, applies tape stop to the vocal stem while keeping
+    Censors bad words by applying downpitching (using librosa pitch shift) and dynamic Tape Stop deceleration.
+    If vocal separation stems are available, downpitches and tape-stops the vocal stem while keeping
     the background instrumental playing smoothly for perfect musical beat timing.
     """
     instrumental_path, vocal_path = None, None
@@ -758,14 +747,26 @@ async def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="ce
         censored_audio += audio[previous_end_time:start_time]
         print(f"[-] Processing tape stop segment: {start_time} ms to {end_time} ms")
         
+        target_vocal = vocals[start_time:end_time] if has_stems else audio[start_time:end_time]
+        
+        # 1. Export target segment to temporary file for down_pitch
+        temp_input = 'temp_ts_in.wav'
+        temp_down = 'temp_ts_down.wav'
+        target_vocal.export(temp_input, format="wav")
+        
+        # 2. Call down_pitch (10 semitones for deep screwed vocal pitch)
+        print(f"[-] Calling downpitch for tape stop segment...")
+        await down_pitch(temp_input, temp_down, semitones=10)
+        downpitched_vocal = AudioSegment.from_file(temp_down)
+        
+        # 3. Apply tape stop deceleration
+        ts_vocal = apply_tape_stop_effect(downpitched_vocal)
+
         if has_stems:
             inst_seg = instrumental[start_time:end_time]
-            voc_seg = vocals[start_time:end_time]
-            ts_vocal = apply_tape_stop_effect(voc_seg)
             censored_segment = inst_seg.overlay(ts_vocal)
         else:
-            segment = audio[start_time:end_time]
-            censored_segment = apply_tape_stop_effect(segment)
+            censored_segment = ts_vocal
 
         censored_audio += censored_segment
 
@@ -847,7 +848,7 @@ async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
 
 async def cleanup():
     print(f'[=] Running clean-up..')
-    files = ['down_temp.wav','down_temp.mp3','temp.wav','temp.mp3']
+    files = ['down_temp.wav','down_temp.mp3','temp.wav','temp.mp3','temp_ts_in.wav','temp_ts_down.wav']
     for file in files:
         if os.path.exists(file):
             os.remove(file)
