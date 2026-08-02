@@ -74,6 +74,7 @@ python async_censormy.py "song.mp3" "bad_words.txt" "slurs.txt" --method=<method
     - `v`: Async vocal separation
     - `Gv`: GenAI vocal separation
     - `b`: Async backspin
+    - `ts`: Async tape stop / vinyl break (or `tape_stop`)
     - `vb`: Async vocal + backspin
     - `p`: Async vocal downpitch
     - `sv`: Async slur + vocal
@@ -85,11 +86,13 @@ python async_censormy.py "song.mp3" "bad_words.txt" "slurs.txt" --method=<method
     - `separate_audio`
     - `censor_with_instrumentals`
     - `censor_with_backspin`
+    - `censor_with_tape_stop`
     - `censor_with_both`
     - `censor_with_downpitch`
     - `censor_with_instrumentals_and_downpitch`
     - `censor_with_both_and_downpitch`
     - `cleanup`
+
 - The async pipeline allows concurrent separation and censorship for faster processing.
 
 ### Migration

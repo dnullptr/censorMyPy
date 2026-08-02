@@ -8,13 +8,13 @@ def main():
     parser.add_argument("audio_file",
         default="song.mp3",
         help="Path to the audio file to be censored. Will use 'song.mp3' as default")
-    parser.add_argument("bad_words_file",help="Path to the bad words file.")
-    parser.add_argument("slurs_file",help="Path to the slurs file.")
+    parser.add_argument("bad_words_file", help="Path to the bad words file.")
+    parser.add_argument("slurs_file", help="Path to the slurs file.")
     parser.add_argument(
         "--method",
-        choices=["v", "b", "vb", "p", "sv"],
+        choices=["v", "b", "vb", "p", "sv", "ts", "tape_stop"],
         required=True,
-        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both, 'p' for down-pitch or 'sv' for slur + vocal.",
+        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both, 'p' for down-pitch, 'sv' for slur + vocal or 'ts'/'tape_stop' for tape stop / vinyl break.",
     )
     parser.add_argument("--output", default="censored_output.mp3", help="Output file path.")
     args = parser.parse_args()
@@ -26,8 +26,6 @@ def main():
     with open(args.bad_words_file, "r") as f:
         bad_words = [line.strip().lower() for line in f]
 
-    
-
     if args.method == "v":
         print("Using vocal separation method...")
         separate_audio(args.audio_file)
@@ -36,6 +34,10 @@ def main():
     elif args.method == "b":
         print("Using backspin method...")
         censor_with_backspin(args.audio_file, bad_words, args.output)
+
+    elif args.method in ["ts", "tape_stop"]:
+        print("Using tape stop method...")
+        censor_with_tape_stop(args.audio_file, bad_words, args.output)
 
     elif args.method == "vb":
         print("Using vocal + backspin method...")
@@ -62,4 +64,3 @@ def main():
 
 if __name__ == "__main__":
    main()
-   

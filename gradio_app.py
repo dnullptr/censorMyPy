@@ -7,6 +7,7 @@ from async_toolset import (
     separate_audio,
     censor_with_instrumentals,
     censor_with_backspin,
+    censor_with_tape_stop,
     censor_with_both,
     censor_with_downpitch,
     censor_with_instrumentals_and_downpitch,
@@ -14,6 +15,7 @@ from async_toolset import (
     cleanup,
     run_in_thread
 )
+
 
 
 def load_words_from_file(file_path):
@@ -114,6 +116,12 @@ async def process_audio(
             task2 = asyncio.create_task(run_in_thread(censor_with_backspin(audio_file, bad_words, output_path)))
             await asyncio.gather(task1, task2)
         
+        elif method == "ts":
+            status = "🎵 Using Tape Stop/Vinyl Break method..."
+            task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+            task2 = asyncio.create_task(run_in_thread(censor_with_tape_stop(audio_file, bad_words, output_path, sep_task=task1)))
+            await asyncio.gather(task1, task2)
+        
         elif method == "vb":
             status = "🎵 Using Vocal + Backspin method..."
             task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
@@ -168,6 +176,7 @@ def create_ui():
         "v": "Vocal Separation - Replace bad words with instrumentals",
         "Gv": "GenAI Vocal Separation - Uses GenAI for transcription",
         "b": "Backspin - Reverse audio segments containing bad words",
+        "ts": "Tape Stop / Vinyl Break - Dynamically pitch-down and decelerate bad word segments",
         "vb": "Vocal + Backspin - Combine vocal separation with reversed vocals",
         "p": "Down-Pitch - Lower the pitch of bad word segments",
         "sv": "Slur + Vocal - Censor bad words with instrumentals, slurs with down-pitch",
@@ -202,6 +211,7 @@ def create_ui():
                         ("Vocal Separation (v)", "v"),
                         ("GenAI Vocal Separation (Gv)", "Gv"),
                         ("Backspin (b)", "b"),
+                        ("Tape Stop / Vinyl Break (ts)", "ts"),
                         ("Vocal + Backspin (vb)", "vb"),
                         ("Down-Pitch (p)", "p"),
                         ("Slur + Vocal (sv)", "sv"),
@@ -211,6 +221,7 @@ def create_ui():
                     value="v",
                     interactive=True
                 )
+
                 
                 # Method description
                 method_info = gr.Markdown(

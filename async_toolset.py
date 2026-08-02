@@ -6,6 +6,7 @@ import soundfile as sf
 import asyncio
 import string
 import json
+import numpy as np
 from pydub import AudioSegment
 from shutil import rmtree
 from module_context import ModuleContext
@@ -620,11 +621,10 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
     audio = AudioSegment.from_file(audio_file_path)
     print(f'[+] Transcribe vocals to find bad words in Progress..')
     bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
-   
 
     censored_audio = AudioSegment.empty()  # Start with an empty audio segment
     previous_end_time = 0  # Keep track of the end of the last processed segment
-  
+
     # Process each bad word segment
     for start_time, end_time in bad_word_timestamps:
         # Add the audio before the bad word
@@ -644,6 +644,145 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
     censored_audio.export(output_file_path, format="mp3")
     print(f"Censored audio saved to {output_file_path}")
 
+def apply_tape_stop_effect(
+    segment: AudioSegment,
+    fade_in_ms: int = 5,
+    fade_out_ms: int = 15,
+    speed_end: float = 0.25,
+    curve_exponent: float = 1.5
+) -> AudioSegment:
+    """
+    Applies a fluent, musical DJ Tape Stop / Vinyl Break pitch-drop effect
+    to an AudioSegment buffer, supporting both Mono and Stereo channels.
+    Includes gain normalization to prevent volume boosting/clipping,
+    and micro fade-in/fade-out for smooth transitions.
+    """
+    if len(segment) == 0:
+        return segment
+
+    # Extract raw PCM samples as float64 for high precision processing
+    orig_raw = np.array(segment.get_array_of_samples())
+    samples = orig_raw.astype(np.float64)
+    num_channels = segment.channels
+
+    if num_channels > 1:
+        samples = samples.reshape((-1, num_channels))
+
+    num_frames = len(samples)
+    if num_frames < 2:
+        return segment
+
+    # Calculate input peak to preserve natural volume level without boosting/clipping
+    orig_peak = np.max(np.abs(samples))
+    if orig_peak == 0:
+        return segment
+
+    # Normalized time u in [0, 1]
+    u = np.linspace(0.0, 1.0, num_frames)
+
+    # Smooth curve for speed decay from 1.0 down to speed_end
+    # speed(u) = 1.0 - (1.0 - speed_end) * (u ** curve_exponent)
+    p = curve_exponent + 1.0
+    phi = u - ((1.0 - speed_end) / p) * (u ** p)
+    phi_max = 1.0 - ((1.0 - speed_end) / p)
+
+    # Map position to input sample indices
+    in_indices = np.arange(num_frames, dtype=np.float64)
+    out_indices = (num_frames - 1) * (phi / phi_max)
+
+    # Interpolate samples for mono / stereo
+    if num_channels == 1:
+        out_samples = np.interp(out_indices, in_indices, samples)
+    else:
+        out_samples = np.zeros((num_frames, num_channels), dtype=np.float64)
+        for c in range(num_channels):
+            out_samples[:, c] = np.interp(out_indices, in_indices, samples[:, c])
+
+    # Normalize output gain so peak matches original segment level (prevents volume boost)
+    out_peak = np.max(np.abs(out_samples))
+    if out_peak > 0:
+        out_samples = out_samples * (orig_peak / out_peak)
+
+    # Convert back to original integer dtype safely
+    if np.issubdtype(orig_raw.dtype, np.integer):
+        info = np.iinfo(orig_raw.dtype)
+        out_samples = np.clip(out_samples, info.min, info.max).astype(orig_raw.dtype)
+    else:
+        out_samples = out_samples.astype(orig_raw.dtype)
+
+    if num_channels > 1:
+        out_samples = out_samples.flatten()
+
+    tape_stopped = AudioSegment(
+        out_samples.tobytes(),
+        frame_rate=segment.frame_rate,
+        sample_width=segment.sample_width,
+        channels=segment.channels
+    )
+
+    # Apply micro fade-in & fade-out for smooth, pop-free transitions
+    if fade_in_ms > 0 and len(tape_stopped) > fade_in_ms:
+        tape_stopped = tape_stopped.fade_in(duration=fade_in_ms)
+    if fade_out_ms > 0 and len(tape_stopped) > fade_out_ms:
+        tape_stopped = tape_stopped.fade_out(duration=fade_out_ms)
+
+    return tape_stopped
+
+async def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="censored_output.mp3", sep_task: asyncio.Task = None):
+    """
+    Censors bad words by applying a dynamic Tape Stop / Vinyl Break pitch-drop effect.
+    If vocal separation stems are available, applies tape stop to the vocal stem while keeping
+    the background instrumental playing smoothly for perfect musical beat timing.
+    """
+    instrumental_path, vocal_path = None, None
+    if sep_task is not None:
+        while not sep_task.done():
+            await asyncio.sleep(0.5)
+        instrumental_path, vocal_path = await get_separated_paths(audio_file_path, both=True)
+
+    print(f'[+] Transcribe vocals to find bad words in Progress..')
+    bad_word_timestamps = await get_bad_word_timestamps(audio_file_path, bad_words)
+    audio = AudioSegment.from_file(audio_file_path)
+
+    has_stems = instrumental_path and vocal_path and os.path.exists(instrumental_path) and os.path.exists(vocal_path)
+    if has_stems:
+        instrumental = AudioSegment.from_file(instrumental_path)
+        vocals = AudioSegment.from_file(vocal_path)
+
+    censored_audio = AudioSegment.empty()  # Start with an empty audio segment
+    previous_end_time = 0  # Keep track of the end of the last processed segment
+
+    # Process each bad word segment
+    for start_time, end_time in bad_word_timestamps:
+        # Add the audio before the bad word
+        censored_audio += audio[previous_end_time:start_time]
+        print(f"[-] Processing tape stop segment: {start_time} ms to {end_time} ms")
+        
+        if has_stems:
+            inst_seg = instrumental[start_time:end_time]
+            voc_seg = vocals[start_time:end_time]
+            ts_vocal = apply_tape_stop_effect(voc_seg)
+            censored_segment = inst_seg.overlay(ts_vocal)
+        else:
+            segment = audio[start_time:end_time]
+            censored_segment = apply_tape_stop_effect(segment)
+
+        censored_audio += censored_segment
+
+        # Update the end time of the last processed segment
+        previous_end_time = end_time
+
+    # Add the remaining audio after the last bad word
+    censored_audio += audio[previous_end_time:]
+
+    # Save the censored audio to the output file
+    if audio_file_path.endswith(".wav"):
+        censored_audio.export(output_file_path, format="wav")
+    else:
+        censored_audio.export(output_file_path, format="mp3", bitrate='320k')
+    print(f"Censored audio saved to {output_file_path}")
+
+
 async def print_transcribed_words(audio_file_path):
     # Load model with high-performance int8_float16 quantization
     model = WhisperModel(
@@ -651,9 +790,9 @@ async def print_transcribed_words(audio_file_path):
         device="cuda", 
         compute_type="int8_float16"
     )
-    
+
     print(f"[#] Debug: Transcribing {audio_file_path} (Faster Engine)")
-    
+
     # 1. Faster-Whisper returns a generator of segments
     segments, info = model.transcribe(
         audio_file_path, 
@@ -662,12 +801,12 @@ async def print_transcribed_words(audio_file_path):
     )
 
     print("Recognized words and their timestamps:")
-    
+
     # 2. Iterate through the generator
     for segment in segments:
         # Print the full segment text for context
         print(f"\n--- Segment: {segment.text.strip()} ---")
-        
+
         # 3. Access 'words' attribute (only exists if word_timestamps=True)
         if segment.words:
             for word_info in segment.words:
@@ -675,18 +814,18 @@ async def print_transcribed_words(audio_file_path):
                 start_time = word_info.start
                 end_time = word_info.end
                 text = word_info.word
-                
+
                 # 4. Print the granular timestamps
                 print(f"   [{start_time:.2f}s -> {end_time:.2f}s]: {text}")
 
     print("\n[#] Debug: End of transcription.")
-     
+
 async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
     # Using GenAI for transcription and not Whisper
     import json
     import genai
     bad_word_timestamps = []
-    
+
     print(f'[+] GenAI toolset bridge function running..')
     # check if transcription.json exists, if not, print error and exit
     if not os.path.exists('transcription.json'):
@@ -695,6 +834,7 @@ async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
 
     with open('transcription.json', 'r') as f:
         result = json.load(f)
+
     # If your JSON has a list of words with 'start', 'end' (in ms), and 'text'
     for word in result: 
         word_text = word['text'].lower()

@@ -9,13 +9,13 @@ async def main():
     parser.add_argument("audio_file",
         default="song.mp3",
         help="Path to the audio file to be censored. Will use 'song.mp3' as default")
-    parser.add_argument("bad_words_file",help="Path to the bad words file.")
-    parser.add_argument("slurs_file",help="Path to the slurs file.")
+    parser.add_argument("bad_words_file", help="Path to the bad words file.")
+    parser.add_argument("slurs_file", help="Path to the slurs file.")
     parser.add_argument(
         "--method",
-        choices=["v", "Gv", "b", "vb", "p", "sv", "sb"],
+        choices=["v", "Gv", "b", "vb", "p", "sv", "sb", "ts", "tape_stop"],
         required=True,
-         help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both, 'Gv' for GenAI vocal separation, 'p' for down-pitch, 'sv' for slur + vocal or 'sb' for slur + both.",
+        help="Censorship method: 'v' for vocal separation, 'b' for backspin, 'vb' for combination of both, 'Gv' for GenAI vocal separation, 'p' for down-pitch, 'sv' for slur + vocal, 'sb' for slur + both or 'ts'/'tape_stop' for tape stop / vinyl break.",
     )
     parser.add_argument("--output", default="censored_output.mp3", help="Output file path.")
     args = parser.parse_args()
@@ -39,26 +39,30 @@ async def main():
         task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals(args.audio_file, bad_words, args.output, genai=True)))
         await asyncio.gather(task1, task2)    
     
-    elif args.method == "b": # Oldest method in the book, doesn't require vocal separationS
+    elif args.method == "b": # Oldest method in the book, doesn't require vocal separation
         print("Using Async backspin method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
         task2 = asyncio.create_task(run_in_thread(censor_with_backspin(args.audio_file, bad_words, args.output)))
         await asyncio.gather(task1, task2)
-        
+
+    elif args.method == 'ts':
+        print("Using Async tape stop method...")
+        task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_tape_stop(args.audio_file, bad_words, args.output, sep_task=task1)))
+        await asyncio.gather(task1, task2)
 
     elif args.method == "vb":
         print("Using Async vocal + backspin method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
-        task2 = asyncio.create_task(run_in_thread(censor_with_both(args.audio_file, bad_words, args.output,sep_task=task1)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_both(args.audio_file, bad_words, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
-        
-        
+
     elif args.method == "p":
         print("Using Async vocal downpitch method...")
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
         task2 = asyncio.create_task(run_in_thread(censor_with_downpitch(args.audio_file, bad_words, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
-    
+
     elif args.method == "sv":
         print("Using Async Slur + Vocal method...")
         with open(args.slurs_file, "r") as f:
@@ -74,13 +78,12 @@ async def main():
         task1 = asyncio.create_task(run_in_thread(separate_audio(args.audio_file)))
         task2 = asyncio.create_task(run_in_thread(censor_with_both_and_downpitch(args.audio_file, bad_words, slurs, args.output, sep_task=task1)))
         await asyncio.gather(task1, task2)
-       
+
     # End time
     end = time.time()
     await cleanup()
     print(f'[=] Took {end-start} seconds to run')
-   
+
 
 if __name__ == "__main__":
-   asyncio.run(main())
-   
+    asyncio.run(main())
