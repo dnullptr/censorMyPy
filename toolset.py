@@ -272,16 +272,21 @@ def apply_tape_stop_effect(
     segment: AudioSegment,
     fade_in_ms: int = 5,
     fade_out_ms: int = 15,
-    speed_end: float = 0.20,
+    intensity: float = 0.6,
     curve_exponent: float = 1.2
 ) -> AudioSegment:
     """
-    Applies a fluent DJ Tape Stop / Vinyl Break deceleration effect
-    to an AudioSegment buffer, supporting both Mono and Stereo channels.
-    Includes gain normalization and micro fade-in/fade-out.
+    Applies a fluent DJ Tape Stop / Vinyl Break deceleration effect.
+    
+    :param intensity: 0.0 to 1.0 (0% to 100% tape-break depth).
+                      Values around 0.5 - 0.7 prevent a complete stop, letting
+                      the audio flow naturally into the track.
     """
     if len(segment) == 0:
         return segment
+
+    intensity = max(0.0, min(1.0, float(intensity)))
+    speed_end = 1.0 - intensity * 0.85
 
     orig_raw = np.array(segment.get_array_of_samples())
     samples = orig_raw.astype(np.float64)
@@ -341,11 +346,19 @@ def apply_tape_stop_effect(
 
     return tape_stopped
 
-def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="censored_output.mp3"):
+def censor_with_tape_stop(
+    audio_file_path,
+    bad_words,
+    output_file_path="censored_output.mp3",
+    semitones: int = 10,
+    intensity: float = 0.6
+):
     """
     Censors bad words by applying downpitching (using librosa pitch shift) and dynamic Tape Stop deceleration.
-    If separated instrumental and vocal stems exist, downpitches and tape-stops the vocal stem while keeping
-    the background instrumental playing for perfect musical rhythm.
+    
+    :param semitones: Number of semitones to shift down (default: 10).
+    :param intensity: Tape break intensity from 0.0 (0%) to 1.0 (100%).
+                      Default 0.6 (60%) allows a smooth vinyl pitch dip that flows naturally.
     """
     import os
     filename = os.path.splitext(os.path.basename(audio_file_path))[0]
@@ -368,7 +381,7 @@ def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="censored
     for start_time, end_time in bad_word_timestamps:
         # Add the audio before the bad word
         censored_audio += audio[previous_end_time:start_time]
-        print(f"[-] Processing tape stop segment: {start_time} ms to {end_time} ms")
+        print(f"[-] Processing tape stop segment (intensity={intensity}): {start_time} ms to {end_time} ms")
         
         target_vocal = vocals[start_time:end_time] if has_stems else audio[start_time:end_time]
         
@@ -377,17 +390,18 @@ def censor_with_tape_stop(audio_file_path, bad_words, output_file_path="censored
         temp_down = 'temp_ts_down.wav'
         target_vocal.export(temp_input, format="wav")
         
-        # 2. Call down_pitch (10 semitones for deep screwed vocal pitch)
-        print(f"[-] Calling downpitch for tape stop segment...")
-        down_pitch(temp_input, temp_down, semitones=10)
+        # 2. Call down_pitch
+        print(f"[-] Calling downpitch ({semitones} semitones) for tape stop segment...")
+        down_pitch(temp_input, temp_down, semitones=semitones)
         downpitched_vocal = AudioSegment.from_file(temp_down)
         
-        # 3. Apply tape stop deceleration
-        ts_vocal = apply_tape_stop_effect(downpitched_vocal)
+        # 3. Apply tape stop deceleration with controlled break intensity
+        ts_vocal = apply_tape_stop_effect(downpitched_vocal, intensity=intensity)
 
         if has_stems:
             inst_seg = instrumental[start_time:end_time]
             censored_segment = inst_seg.overlay(ts_vocal)
+
         else:
             censored_segment = ts_vocal
 

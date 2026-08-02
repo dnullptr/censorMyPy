@@ -33,7 +33,8 @@ async def process_audio(
     use_builtin_slurs,
     slurs_file,
     method,
-    output_filename
+    output_filename,
+    ts_intensity=0.6
 ):
     """
     Process audio file with the specified censorship method.
@@ -44,8 +45,9 @@ async def process_audio(
         bad_words_file: Uploaded custom bad words file (if not using built-in)
         use_builtin_slurs: Whether to use built-in slurs.txt
         slurs_file: Uploaded custom slurs file (if not using built-in)
-        method: Censorship method ('v', 'Gv', 'b', 'vb', 'p', 'sv', 'sb')
+        method: Censorship method ('v', 'Gv', 'b', 'ts', 'vb', 'p', 'sv', 'sb')
         output_filename: Output filename
+        ts_intensity: Tape stop break intensity (0.0 to 1.0)
     
     Returns:
         Tuple of (output_file_path, status_message, processing_time)
@@ -117,9 +119,9 @@ async def process_audio(
             await asyncio.gather(task1, task2)
         
         elif method == "ts":
-            status = "🎵 Using Tape Stop/Vinyl Break method..."
+            status = f"🎵 Using Tape Stop/Vinyl Break method (intensity={ts_intensity:.2f})..."
             task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
-            task2 = asyncio.create_task(run_in_thread(censor_with_tape_stop(audio_file, bad_words, output_path, sep_task=task1)))
+            task2 = asyncio.create_task(run_in_thread(censor_with_tape_stop(audio_file, bad_words, output_path, sep_task=task1, intensity=ts_intensity)))
             await asyncio.gather(task1, task2)
         
         elif method == "vb":
@@ -223,6 +225,18 @@ def create_ui():
                 )
 
                 
+                # Tape Stop Intensity Slider (Visible only when 'ts' method is selected)
+                ts_intensity_slider = gr.Slider(
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.6,
+                    step=0.05,
+                    label="Tape Stop Break Intensity",
+                    info="0.0 (0% - pure downpitch, no speed drop) to 1.0 (100% - full complete tape stop break)",
+                    interactive=True,
+                    visible=False
+                )
+
                 # Method description
                 method_info = gr.Markdown(
                     value=f"**Selected Method:** {method_descriptions['v']}",
@@ -313,23 +327,25 @@ def create_ui():
             interactive=False
         )
         
-        # Update method description when dropdown changes
-        def update_method_description(method):
-            return f"**Selected Method:** {method_descriptions.get(method, 'Unknown method')}"
+        # Update method description & toggle slider visibility when dropdown changes
+        def update_method_ui(method):
+            desc = f"**Selected Method:** {method_descriptions.get(method, 'Unknown method')}"
+            show_slider = (method == "ts")
+            return desc, gr.update(visible=show_slider)
         
         method_dropdown.change(
-            fn=update_method_description,
+            fn=update_method_ui,
             inputs=[method_dropdown],
-            outputs=[method_info]
+            outputs=[method_info, ts_intensity_slider]
         )
         
         # Process audio when button is clicked
-        def run_process(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name):
-            return asyncio.run(process_audio(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name))
+        def run_process(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity):
+            return asyncio.run(process_audio(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity))
         
         process_btn.click(
             fn=run_process,
-            inputs=[audio_input, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method_dropdown, output_filename],
+            inputs=[audio_input, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method_dropdown, output_filename, ts_intensity_slider],
             outputs=[audio_output, status_output, time_output]
         )
         
