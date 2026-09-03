@@ -186,7 +186,8 @@ def create_ui():
     }
     
     with gr.Blocks(
-        title="CensorMyPy - Music Censhorship Tool"
+        title="CensorMyPy - Music Censhorship Tool",
+        theme=gr.themes.Soft()
     ) as app:
         gr.Markdown(
             """
@@ -194,6 +195,8 @@ def create_ui():
             
             Censor explicit content from your audio files using various methods.
             Upload an audio file, choose your preferred method and let's f***king go!.
+            
+            > ⚡ **Hardware Acceleration:** AMD BC-250 (RADV GFX1013) Vulkan GPU Enabled
             """
         )
         
@@ -378,6 +381,5 @@ if __name__ == "__main__":
     app.launch(
         server_name="0.0.0.0",
         server_port=8000,
-        share=False,
-        theme=gr.themes.Soft()
+        share=False
     )

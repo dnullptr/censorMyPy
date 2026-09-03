@@ -1,0 +1,13 @@
+services:
+  censormypy:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "8000:8000"
+      - "7860:7860"
+    volumes:
+      - ./uploads:/app/uploads
+      - .:/app
+    stdin_open: true
+    tty: true

@@ -1,4 +1,6 @@
 import os
+import time
+import tempfile
 import whisper
 import librosa
 import torch
@@ -11,6 +13,149 @@ from pydub import AudioSegment
 from shutil import rmtree
 from module_context import ModuleContext
 from faster_whisper import WhisperModel
+
+
+def _get_whisper_device_config():
+    """
+    Returns (device, compute_type) based on environment variable WHISPER_DEVICE
+    or torch.cuda.is_available(). Automatically falls back to CPU on systems without CUDA.
+    """
+    device = os.getenv("WHISPER_DEVICE")
+    if device:
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8_float16" if device == "cuda" else "int8")
+        return device, compute_type
+    if torch.cuda.is_available():
+        return "cuda", "int8_float16"
+    return "cpu", "int8"
+
+
+async def _transcribe_vulkan_cli(audio_file_path, vulkan_cli, vulkan_model):
+    temp_prefix = os.path.join(tempfile.gettempdir(), f"whisper_vk_{os.getpid()}_{int(time.time()*1000)}")
+    temp_wav = f"{temp_prefix}.wav"
+    json_path = f"{temp_prefix}.json"
+
+    # 1. Pre-convert audio to 16kHz mono WAV with ffmpeg
+    # This strips embedded album art (MJPEG/video streams) that confuse miniaudio
+    # and provides Whisper with its native 16kHz audio format.
+    conv_cmd = [
+        "ffmpeg", "-y",
+        "-i", os.path.abspath(audio_file_path),
+        "-vn",
+        "-ar", "16000",
+        "-ac", "1",
+        temp_wav
+    ]
+    conv_proc = await asyncio.create_subprocess_exec(
+        *conv_cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    await conv_proc.communicate()
+
+    target_audio = temp_wav if (conv_proc.returncode == 0 and os.path.exists(temp_wav)) else os.path.abspath(audio_file_path)
+
+    cmd = [
+        vulkan_cli,
+        "-m", os.path.abspath(vulkan_model),
+        "-f", target_audio,
+        "-ml", "1",
+        "-sow",
+        "-oj",
+        "-of", temp_prefix,
+        "-l", "auto"
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+
+    if os.path.exists(temp_wav):
+        try:
+            os.unlink(temp_wav)
+        except OSError:
+            pass
+
+    if proc.returncode != 0 or not os.path.exists(json_path):
+        raise RuntimeError(f"Vulkan CLI exited with code {proc.returncode}: {stderr.decode('utf-8', errors='ignore')}")
+
+    # Print GPU confirmation and timings from whisper-cli output
+    output_text = stdout.decode('utf-8', errors='ignore') + "\n" + stderr.decode('utf-8', errors='ignore')
+    for line in output_text.splitlines():
+        if "using Vulkan" in line or "Vulkan devices:" in line or "total time" in line:
+            print(f"    [GPU Status] {line.strip()}")
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    try:
+        os.unlink(json_path)
+    except OSError:
+        pass
+
+    all_words = []
+    for item in data.get("transcription", []):
+        raw_word = item.get("text", "").strip()
+        if not raw_word:
+            continue
+        clean_word = raw_word.lower().strip().strip(string.punctuation)
+        offsets = item.get("offsets", {})
+        start_sec = offsets.get("from", 0) / 1000.0
+        end_sec = offsets.get("to", 0) / 1000.0
+        all_words.append({
+            'raw': raw_word,
+            'clean': clean_word,
+            'start': start_sec,
+            'end': end_sec
+        })
+    return all_words
+
+
+async def transcribe_audio_words(audio_file_path):
+    """
+    Transcribes audio to word-level timestamps.
+    Automatically prioritizes Vulkan GPU acceleration on AMD BC-250 if available,
+    falling back to Faster-Whisper (CUDA or CPU).
+    """
+    backend = os.getenv("WHISPER_BACKEND", "").lower().strip()
+    vulkan_cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "whisper-vulkan-cli")
+    if not os.path.exists(vulkan_cli):
+        vulkan_cli = os.path.expanduser("~/.local/bin/whisper-vulkan-cli")
+
+    vulkan_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "ggml-medium.bin")
+    if not os.path.exists(vulkan_model):
+        vulkan_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "ggml-base.bin")
+
+    use_vulkan = (backend == "vulkan") or (backend != "cpu" and backend != "faster_whisper" and os.path.exists(vulkan_cli) and os.path.exists(vulkan_model))
+
+    if use_vulkan:
+        try:
+            print(f'[+] Transcribing {audio_file_path} with Vulkan GPU Acceleration on AMD BC-250...')
+            return await _transcribe_vulkan_cli(audio_file_path, vulkan_cli, vulkan_model)
+        except Exception as e:
+            print(f'[-] Vulkan GPU transcription failed ({e}), falling back to Faster-Whisper...')
+
+    print(f'[+] Transcribing {audio_file_path} with Faster-Whisper Engine...')
+    device, compute_type = _get_whisper_device_config()
+    model = WhisperModel("medium", device=device, compute_type=compute_type)
+    segments, info = model.transcribe(audio_file_path, word_timestamps=True, beam_size=5)
+
+    all_words = []
+    for segment in segments:
+        if segment.words:
+            for word_obj in segment.words:
+                raw_word = word_obj.word
+                clean_word = raw_word.lower().strip().strip(string.punctuation)
+                all_words.append({
+                    'raw': raw_word,
+                    'clean': clean_word,
+                    'start': word_obj.start,
+                    'end': word_obj.end
+                })
+    return all_words
+
 
 
 async def separate_audio(input_audio_path, output_dir="separated"):
@@ -55,36 +200,8 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
     if cached_timestamps is not None:
         return cached_timestamps
 
-    # 2. TRANSCRIPTION (Updated for Faster-Whisper)
-    print(f'[+] Transcribing {audio_file_path} with word-level timestamps (Faster Engine)...')
-
-    model = WhisperModel(
-        "medium", 
-        device="cuda", 
-        compute_type="int8_float16"
-    )
-
-    segments, info = model.transcribe(
-        audio_file_path,
-        word_timestamps=True,
-        beam_size=5
-    )
-
-    # 3. PREPROCESS WORDS
-    # Convert generator to list to consume it completely before cleanup
-    segments_list = list(segments)
-    all_words = []   # each element: {'raw': str, 'clean': str, 'start': float, 'end': float}
-    for segment in segments_list:
-        if segment.words:
-            for word_obj in segment.words:
-                raw_word = word_obj.word
-                clean_word = raw_word.lower().strip().strip(string.punctuation)
-                all_words.append({
-                    'raw': raw_word,
-                    'clean': clean_word,
-                    'start': word_obj.start,
-                    'end': word_obj.end
-                })
+    # 2. TRANSCRIPTION (Vulkan GPU on AMD BC-250 or Faster-Whisper Fallback)
+    all_words = await transcribe_audio_words(audio_file_path)
 
     # 4. PREPROCESS BAD WORDS: split each bad word into tokens (cleaned similarly)
     bad_phrases = []
@@ -150,8 +267,8 @@ async def get_bad_word_timestamps(audio_file_path, bad_words):
     print(f'[+] Saved transcription cache to {audio_file_path}.json')
 
     # 9. CLEAN UP MODEL TO FREE GPU MEMORY
-    del model
-    import torch
+    if 'model' in locals():
+        del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -168,38 +285,8 @@ async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
             data = json.load(f)
             return [tuple(item) for item in data['bad_words']], [tuple(item) for item in data['slurs']]
 
-    # 2. Load Faster-Whisper Model
-    # Using 'int8_float16' for massive VRAM savings (1.5GB-ish on 8GB GPU)
-    model = WhisperModel(
-        "medium",
-        device="cuda",
-        compute_type="int8_float16"
-    )
-
-    print(f'[+] Transcribing {audio_file_path} for bad words and slurs...')
-
-    # 3. Run Transcription
-    # word_timestamps=True is mandatory for the 'surgical' data you need
-    segments, info = model.transcribe(
-        audio_file_path,
-        word_timestamps=True,
-        beam_size=5
-    )
-
-    # 4. PREPROCESS WORDS
-    segments_list = list(segments)
-    all_words = []   # each element: {'raw': str, 'clean': str, 'start': float, 'end': float}
-    for segment in segments_list:
-        if segment.words:
-            for word_obj in segment.words:
-                raw_word = word_obj.word
-                clean_word = raw_word.lower().strip().strip(string.punctuation)
-                all_words.append({
-                    'raw': raw_word,
-                    'clean': clean_word,
-                    'start': word_obj.start,
-                    'end': word_obj.end
-                })
+    # 2. TRANSCRIPTION (Vulkan GPU on AMD BC-250 or Faster-Whisper Fallback)
+    all_words = await transcribe_audio_words(audio_file_path)
 
     # 5. PREPROCESS BAD WORDS AND SLURS: split each into tokens (cleaned similarly)
     def preprocess_terms(terms):
@@ -295,8 +382,8 @@ async def get_bad_word_and_slurs_timestamps(audio_file_path, bad_words, slurs):
     print(f'[+] Saved transcription cache to {cache_file}')
 
     # 10. CLEAN UP MODEL TO FREE GPU MEMORY
-    del model
-    import torch
+    if 'model' in locals():
+        del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -800,40 +887,10 @@ async def censor_with_tape_stop(
 
 
 async def print_transcribed_words(audio_file_path):
-    # Load model with high-performance int8_float16 quantization
-    model = WhisperModel(
-        "medium", 
-        device="cuda", 
-        compute_type="int8_float16"
-    )
-
-    print(f"[#] Debug: Transcribing {audio_file_path} (Faster Engine)")
-
-    # 1. Faster-Whisper returns a generator of segments
-    segments, info = model.transcribe(
-        audio_file_path, 
-        word_timestamps=True,
-        beam_size=5
-    )
-
-    print("Recognized words and their timestamps:")
-
-    # 2. Iterate through the generator
-    for segment in segments:
-        # Print the full segment text for context
-        print(f"\n--- Segment: {segment.text.strip()} ---")
-
-        # 3. Access 'words' attribute (only exists if word_timestamps=True)
-        if segment.words:
-            for word_info in segment.words:
-                # Note: Attributes are accessed with dot notation, not brackets
-                start_time = word_info.start
-                end_time = word_info.end
-                text = word_info.word
-
-                # 4. Print the granular timestamps
-                print(f"   [{start_time:.2f}s -> {end_time:.2f}s]: {text}")
-
+    all_words = await transcribe_audio_words(audio_file_path)
+    print(f"\n[#] Recognized {len(all_words)} words and their timestamps for {audio_file_path}:")
+    for w in all_words:
+        print(f"   [{w['start']:.2f}s -> {w['end']:.2f}s]: {w['raw']}")
     print("\n[#] Debug: End of transcription.")
 
 async def get_bad_word_timestamps_genai(audio_file_path, bad_words):
