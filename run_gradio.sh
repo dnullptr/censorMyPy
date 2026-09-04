@@ -10,7 +10,9 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
 fi
 
 # Automatically free port 8000 if previously occupied
-fuser -k 8000/tcp 2>/dev/null || true
+fuser -k 8000/tcp 2>/dev/null || /usr/sbin/fuser -k 8000/tcp 2>/dev/null || true
+pkill -f "gradio_app.py" 2>/dev/null || true
+sleep 0.5
 
 echo "===================================================="
 echo " Starting CensorMyPy Gradio Web UI on Bazzite (BC-250)"
