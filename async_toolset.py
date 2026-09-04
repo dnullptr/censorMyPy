@@ -113,7 +113,7 @@ async def _transcribe_vulkan_cli(audio_file_path, vulkan_cli, vulkan_model):
     return all_words
 
 
-async def transcribe_audio_words(audio_file_path):
+async def transcribe_audio_words(audio_file_path, model_name=None):
     """
     Transcribes audio to word-level timestamps.
     Automatically prioritizes Vulkan GPU acceleration on AMD BC-250 if available,
@@ -124,22 +124,32 @@ async def transcribe_audio_words(audio_file_path):
     if not os.path.exists(vulkan_cli):
         vulkan_cli = os.path.expanduser("~/.local/bin/whisper-vulkan-cli")
 
-    vulkan_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "ggml-medium.bin")
+    if not model_name:
+        model_name = os.getenv("WHISPER_MODEL", "large-v3-turbo").lower().strip()
+
+    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+    vulkan_model = os.path.join(models_dir, f"ggml-{model_name}.bin")
     if not os.path.exists(vulkan_model):
-        vulkan_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "ggml-base.bin")
+        for fallback in ["ggml-large-v3-turbo.bin", "ggml-medium.bin", "ggml-base.bin"]:
+            p = os.path.join(models_dir, fallback)
+            if os.path.exists(p):
+                vulkan_model = p
+                break
 
     use_vulkan = (backend == "vulkan") or (backend != "cpu" and backend != "faster_whisper" and os.path.exists(vulkan_cli) and os.path.exists(vulkan_model))
 
     if use_vulkan:
         try:
-            print(f'[+] Transcribing {audio_file_path} with Vulkan GPU Acceleration on AMD BC-250...')
+            model_display = os.path.basename(vulkan_model)
+            print(f'[+] Transcribing {audio_file_path} using [{model_display}] with Vulkan GPU on AMD BC-250...')
             return await _transcribe_vulkan_cli(audio_file_path, vulkan_cli, vulkan_model)
         except Exception as e:
             print(f'[-] Vulkan GPU transcription failed ({e}), falling back to Faster-Whisper...')
 
-    print(f'[+] Transcribing {audio_file_path} with Faster-Whisper Engine...')
+    faster_model = "large-v3" if "large" in model_name else ("medium" if "medium" in model_name else "base")
+    print(f'[+] Transcribing {audio_file_path} with Faster-Whisper [{faster_model}]...')
     device, compute_type = _get_whisper_device_config()
-    model = WhisperModel("medium", device=device, compute_type=compute_type)
+    model = WhisperModel(faster_model, device=device, compute_type=compute_type)
     segments, info = model.transcribe(audio_file_path, word_timestamps=True, beam_size=5)
 
     all_words = []

@@ -34,24 +34,14 @@ async def process_audio(
     slurs_file,
     method,
     output_filename,
-    ts_intensity=0.6
+    ts_intensity=0.6,
+    whisper_model="large-v3-turbo"
 ):
     """
     Process audio file with the specified censorship method.
-    
-    Args:
-        audio_file: Path to uploaded audio file
-        use_builtin_bad_words: Whether to use built-in bad_words.txt
-        bad_words_file: Uploaded custom bad words file (if not using built-in)
-        use_builtin_slurs: Whether to use built-in slurs.txt
-        slurs_file: Uploaded custom slurs file (if not using built-in)
-        method: Censorship method ('v', 'Gv', 'b', 'ts', 'vb', 'p', 'sv', 'sb')
-        output_filename: Output filename
-        ts_intensity: Tape stop break intensity (0.0 to 1.0)
-    
-    Returns:
-        Tuple of (output_file_path, status_message, processing_time)
     """
+    if whisper_model:
+        os.environ["WHISPER_MODEL"] = whisper_model
     if audio_file is None:
         return None, "❌ Error: Please upload an audio file.", "0s"
     
@@ -194,7 +184,7 @@ def create_ui():
             # 🎵 CensorMyPy - Music Censhorship Tool
             
             Censor explicit content from your audio files using various methods.
-            Upload an audio file, choose your preferred method and let's f***king go!.
+            Upload an audio file, choose your preferred method and let us go!
             
             > ⚡ **Hardware Acceleration:** AMD BC-250 (RADV GFX1013) Vulkan GPU Enabled
             """
@@ -224,6 +214,18 @@ def create_ui():
                     ],
                     label="Censorship Method",
                     value="v",
+                    interactive=True
+                )
+
+                # Whisper Model Selection (Vulkan GPU)
+                model_dropdown = gr.Dropdown(
+                    choices=[
+                        ("Large-v3-Turbo (🌟 Recommended - Highest Accuracy & Fast)", "large-v3-turbo"),
+                        ("Medium (Standard)", "medium"),
+                        ("Base (Fast Preview)", "base")
+                    ],
+                    label="Whisper AI Model (Vulkan GPU)",
+                    value="large-v3-turbo",
                     interactive=True
                 )
 
@@ -343,12 +345,12 @@ def create_ui():
         )
         
         # Process audio when button is clicked
-        def run_process(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity):
-            return asyncio.run(process_audio(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity))
+        def run_process(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity, whisper_model):
+            return asyncio.run(process_audio(audio_file, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method, output_name, ts_intensity, whisper_model))
         
         process_btn.click(
             fn=run_process,
-            inputs=[audio_input, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method_dropdown, output_filename, ts_intensity_slider],
+            inputs=[audio_input, use_builtin_bad_words, bad_words_file, use_builtin_slurs, slurs_file, method_dropdown, output_filename, ts_intensity_slider, model_dropdown],
             outputs=[audio_output, status_output, time_output]
         )
         
