@@ -12,20 +12,15 @@ if [ ! -f "$NGROK" ]; then
     fi
 fi
 
-DOMAIN="${1:-$NGROK_DOMAIN}"
+DEFAULT_DOMAIN="ridden-ammonia-eternity.ngrok-free.dev"
+DOMAIN="${1:-${NGROK_DOMAIN:-$DEFAULT_DOMAIN}}"
 
-if [ -n "$DOMAIN" ]; then
-    # Strip leading protocol if present
-    CLEAN_DOMAIN=$(echo "$DOMAIN" | sed -e 's|^https://||' -e 's|^http://||')
-    echo "================================================================="
-    echo " Starting ngrok with static domain: https://$CLEAN_DOMAIN"
-    echo " Forwarding to local Gradio server on http://localhost:8000"
-    echo "================================================================="
-    exec "$NGROK" http --url="https://$CLEAN_DOMAIN" 8000
-else
-    echo "================================================================="
-    echo " Starting ngrok -> http://localhost:8000"
-    echo " Tip: Run with your domain: ./run_ngrok.sh your-name.ngrok-free.app"
-    echo "================================================================="
-    exec "$NGROK" http 8000
-fi
+# Strip leading protocol if present
+CLEAN_DOMAIN=$(echo "$DOMAIN" | sed -e 's|^https://||' -e 's|^http://||')
+
+echo "================================================================="
+echo " Starting ngrok with static domain: https://$CLEAN_DOMAIN"
+echo " Forwarding to local Gradio server on http://localhost:8000"
+echo "================================================================="
+
+exec "$NGROK" http --url="https://$CLEAN_DOMAIN" 8000
