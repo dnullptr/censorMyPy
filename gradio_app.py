@@ -379,9 +379,21 @@ def create_ui():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Run CensorMyPy Gradio UI")
+    parser.add_argument("--share", action="store_true", help="Enable public Gradio sharing URL")
+    parser.add_argument("--port", type=int, default=8000, help="Port to run on")
+    parser.add_argument("--auth", type=str, default=None, help="Basic auth in format user:password")
+    args, _ = parser.parse_known_args()
+
+    share_enabled = args.share or os.getenv("SHARE", "").lower() in ("true", "1", "yes")
+    auth_env = os.getenv("GRADIO_AUTH", args.auth)
+    auth = tuple(auth_env.split(":", 1)) if auth_env and ":" in auth_env else None
+
     app = create_ui()
     app.launch(
         server_name="0.0.0.0",
-        server_port=8000,
-        share=False
+        server_port=args.port,
+        share=share_enabled,
+        auth=auth
     )

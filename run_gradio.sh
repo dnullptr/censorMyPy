@@ -19,4 +19,4 @@ echo " UI will be available at: http://localhost:8000"
 echo "===================================================="
 
 export PYTHONUNBUFFERED=1
-exec "$SCRIPT_DIR/.venv/bin/python" gradio_app.py
+exec "$SCRIPT_DIR/.venv/bin/python" gradio_app.py "$@"
