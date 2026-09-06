@@ -7,7 +7,8 @@
 export PATH="$HOME/.local/bin:$HOME/.local/share/nodejs/bin:$PATH"
 
 PORT=8000
-SUBDOMAIN="${1:-censormypy}"
+DEFAULT_SUBDOMAIN="kudsha-censor-250"
+SUBDOMAIN="${1:-$DEFAULT_SUBDOMAIN}"
 
 if ! command -v lt >/dev/null 2>&1; then
     echo "Error: localtunnel (lt) not found in PATH."
