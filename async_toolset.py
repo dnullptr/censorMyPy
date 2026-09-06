@@ -1,6 +1,7 @@
 import os
 import time
 import tempfile
+import subprocess
 import whisper
 import librosa
 import torch
@@ -10,6 +11,7 @@ import string
 import json
 import numpy as np
 from pydub import AudioSegment
+from pydub.utils import mediainfo
 from shutil import rmtree
 from module_context import ModuleContext
 from faster_whisper import WhisperModel
@@ -743,7 +745,10 @@ async def censor_with_backspin(audio_file_path, bad_words, output_file_path="cen
     censored_audio += audio[previous_end_time:]
 
     # Save the censored audio to the output file
-    censored_audio.export(output_file_path, format="mp3")
+    if audio_file_path.endswith(".wav") or output_file_path.endswith(".wav"):
+        censored_audio.export(output_file_path, format="wav")
+    else:
+        censored_audio.export(output_file_path, format="mp3", bitrate='320k')
     print(f"Censored audio saved to {output_file_path}")
 
 def apply_tape_stop_effect(
@@ -944,3 +949,322 @@ async def cleanup():
 
 async def run_in_thread(coro):
     await asyncio.to_thread(asyncio.run, coro)
+
+
+def format_time(seconds):
+    """Format seconds into MM:SS or HH:MM:SS string."""
+    seconds = max(0, int(round(seconds)))
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def get_audio_duration(audio_file_path):
+    """
+    Get the duration of an audio file in seconds quickly using ffprobe
+    without reading the entire audio into memory. Falls back to pydub.
+    """
+    if not audio_file_path or not os.path.exists(audio_file_path):
+        return 0.0
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            audio_file_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        if res.returncode == 0 and res.stdout.strip():
+            return float(res.stdout.strip())
+    except Exception:
+        pass
+    try:
+        info = mediainfo(audio_file_path)
+        return float(info.get("duration", 0.0))
+    except Exception:
+        pass
+    return 0.0
+
+
+async def split_audio_into_chunks(audio_file_path, chunk_duration_sec=300, temp_dir=None):
+    """
+    Splits an audio file into 5-minute (chunk_duration_sec) 16-bit PCM WAV chunks.
+    Ensures seamless sample-aligned audio without generational re-encoding loss.
+    Merges any trailing audio under 30 seconds into the last chunk to avoid tiny fragments.
+    """
+    total_duration = get_audio_duration(audio_file_path)
+    if total_duration <= 0:
+        return [{"path": audio_file_path, "start": 0.0, "end": 0.0, "duration": 0.0}]
+
+    if total_duration <= float(chunk_duration_sec) * 1.15:
+        return [{"path": audio_file_path, "start": 0.0, "end": total_duration, "duration": total_duration}]
+
+    if temp_dir is None:
+        temp_dir = tempfile.mkdtemp(prefix="cmypy_chunks_")
+
+    chunks = []
+    start = 0.0
+    idx = 0
+    while start < total_duration:
+        remaining = total_duration - start
+        dur = min(float(chunk_duration_sec), remaining)
+        # Avoid tiny tail chunk (< 30s) by merging into this chunk
+        if remaining - dur < 30.0:
+            dur = remaining
+
+        chunk_file = os.path.join(temp_dir, f"chunk_{idx:03d}.wav")
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start:.3f}",
+            "-i", audio_file_path,
+            "-t", f"{dur:.3f}",
+            "-vn",
+            "-c:a", "pcm_s16le",
+            chunk_file
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await proc.communicate()
+
+        if proc.returncode != 0 or not os.path.exists(chunk_file):
+            raise RuntimeError(f"FFmpeg failed to extract chunk {idx} ({start:.1f}s to {start+dur:.1f}s)")
+
+        chunks.append({
+            "path": chunk_file,
+            "start": start,
+            "end": start + dur,
+            "duration": dur
+        })
+        start += dur
+        idx += 1
+        if start >= total_duration - 0.1:
+            break
+
+    return chunks
+
+
+async def rejoin_audio_chunks(chunk_paths, output_path, original_input_path=None):
+    """
+    Concatenates processed audio chunks into the target output file.
+    Preserves WAV format if original or output ends in .wav; otherwise encodes high-quality 320k MP3.
+    """
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    if len(chunk_paths) == 1 and os.path.abspath(chunk_paths[0]) == os.path.abspath(output_path):
+        return output_path
+
+    is_wav = output_path.lower().endswith(".wav") or (original_input_path and original_input_path.lower().endswith(".wav"))
+
+    list_file = os.path.join(tempfile.gettempdir(), f"concat_{os.getpid()}_{int(time.time()*1000)}.txt")
+    with open(list_file, "w", encoding="utf-8") as f:
+        for p in chunk_paths:
+            safe_p = os.path.abspath(p).replace("'", "'\\''")
+            f.write(f"file '{safe_p}'\n")
+
+    if is_wav:
+        cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file, "-c:a", "pcm_s16le", output_path]
+    else:
+        cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file, "-c:a", "libmp3lame", "-b:a", "320k", output_path]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    await proc.communicate()
+
+    if os.path.exists(list_file):
+        try:
+            os.unlink(list_file)
+        except OSError:
+            pass
+
+    # Fallback to pydub if ffmpeg failed or output is missing/empty
+    if not (os.path.exists(output_path) and os.path.getsize(output_path) > 0):
+        print("[-] FFmpeg concat failed, falling back to pydub concatenation...")
+        combined = AudioSegment.empty()
+        for p in chunk_paths:
+            combined += AudioSegment.from_file(p)
+        if is_wav:
+            combined.export(output_path, format="wav")
+        else:
+            combined.export(output_path, format="mp3", bitrate="320k")
+
+    return output_path
+
+
+async def process_single_audio_file(
+    audio_file,
+    bad_words,
+    slurs=None,
+    method="v",
+    output_path="censored_output.mp3",
+    ts_intensity=0.6,
+    whisper_model="large-v3-turbo",
+    genai=False
+):
+    """
+    Executes censorship for a single audio file (full track or individual chunk).
+    """
+    if whisper_model:
+        os.environ["WHISPER_MODEL"] = whisper_model
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    if method == "v":
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals(audio_file, bad_words, output_path, genai=genai)))
+        await asyncio.gather(task1, task2)
+    elif method == "Gv":
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals(audio_file, bad_words, output_path, genai=True)))
+        await asyncio.gather(task1, task2)
+    elif method == "b":
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_backspin(audio_file, bad_words, output_path)))
+        await asyncio.gather(task1, task2)
+    elif method in ("ts", "tape_stop"):
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_tape_stop(audio_file, bad_words, output_path, sep_task=task1, intensity=ts_intensity)))
+        await asyncio.gather(task1, task2)
+    elif method == "vb":
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_both(audio_file, bad_words, output_path, sep_task=task1)))
+        await asyncio.gather(task1, task2)
+    elif method == "p":
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_downpitch(audio_file, bad_words, output_path, sep_task=task1)))
+        await asyncio.gather(task1, task2)
+    elif method == "sv":
+        if not slurs:
+            raise ValueError("Slurs list is required for 'sv' method")
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_instrumentals_and_downpitch(audio_file, bad_words, slurs, output_path, sep_task=task1)))
+        await asyncio.gather(task1, task2)
+    elif method == "sb":
+        if not slurs:
+            raise ValueError("Slurs list is required for 'sb' method")
+        task1 = asyncio.create_task(run_in_thread(separate_audio(audio_file)))
+        task2 = asyncio.create_task(run_in_thread(censor_with_both_and_downpitch(audio_file, bad_words, slurs, output_path, sep_task=task1)))
+        await asyncio.gather(task1, task2)
+    else:
+        raise ValueError(f"Unknown censorship method '{method}'")
+
+    await cleanup()
+    return output_path
+
+
+async def _call_progress(callback, fraction, message):
+    if not callback:
+        return
+    try:
+        if asyncio.iscoroutinefunction(callback):
+            await callback(fraction, message)
+        else:
+            callback(fraction, message)
+    except Exception:
+        pass
+
+
+async def process_audio_pipeline(
+    audio_file,
+    bad_words,
+    slurs=None,
+    method="v",
+    output_path="censored_output.mp3",
+    ts_intensity=0.6,
+    whisper_model="large-v3-turbo",
+    enable_chunking=False,
+    chunk_duration_sec=300,
+    progress_callback=None
+):
+    """
+    Main processing pipeline. Supports optional 5-minute chunking for long mixtapes/sets
+    to prevent VRAM and RAM exhaustion, with real-time progress callbacks.
+    """
+    total_dur = get_audio_duration(audio_file)
+    dur_str = format_time(total_dur)
+
+    should_chunk = enable_chunking and (total_dur > float(chunk_duration_sec) * 1.15)
+
+    if not should_chunk:
+        if progress_callback:
+            await _call_progress(progress_callback, 0.1, f"🎵 Processing audio ({dur_str})...")
+        await process_single_audio_file(
+            audio_file=audio_file,
+            bad_words=bad_words,
+            slurs=slurs,
+            method=method,
+            output_path=output_path,
+            ts_intensity=ts_intensity,
+            whisper_model=whisper_model
+        )
+        if progress_callback:
+            await _call_progress(progress_callback, 1.0, "✅ Processing complete!")
+        return output_path
+
+    # Chunked processing pipeline
+    temp_dir = tempfile.mkdtemp(prefix="cmypy_chunks_")
+    try:
+        chunks = await split_audio_into_chunks(audio_file, chunk_duration_sec=chunk_duration_sec, temp_dir=temp_dir)
+        total_chunks = len(chunks)
+        print(f"[+] Chunking enabled: Audio is {dur_str} long. Split into {total_chunks} chunks.")
+
+        censored_chunk_paths = []
+        for i, chunk_info in enumerate(chunks):
+            start_str = format_time(chunk_info["start"])
+            end_str = format_time(chunk_info["end"])
+            chunk_label = f"[Chunk {i+1}/{total_chunks}] ({start_str} - {end_str})"
+
+            frac = (i / total_chunks) * 0.9
+            if progress_callback:
+                await _call_progress(progress_callback, frac, f"🎵 {chunk_label} Processing...")
+            print(f"\n[+] {chunk_label} Processing {chunk_info['path']}...")
+
+            chunk_out = os.path.join(temp_dir, f"censored_chunk_{i:03d}.wav")
+            await process_single_audio_file(
+                audio_file=chunk_info["path"],
+                bad_words=bad_words,
+                slurs=slurs,
+                method=method,
+                output_path=chunk_out,
+                ts_intensity=ts_intensity,
+                whisper_model=whisper_model
+            )
+            censored_chunk_paths.append(chunk_out)
+
+            # Clean up whisper cache file for this chunk
+            chunk_json = f"{chunk_info['path']}.json"
+            if os.path.exists(chunk_json):
+                try:
+                    os.unlink(chunk_json)
+                except OSError:
+                    pass
+            chunk_bad_slurs = f"{chunk_info['path']}_bad_slurs.json"
+            if os.path.exists(chunk_bad_slurs):
+                try:
+                    os.unlink(chunk_bad_slurs)
+                except OSError:
+                    pass
+
+        if progress_callback:
+            await _call_progress(progress_callback, 0.92, f"🔄 Rejoining {total_chunks} chunks into final audio...")
+        print(f"\n[+] Rejoining {len(censored_chunk_paths)} chunks into {output_path}...")
+        await rejoin_audio_chunks(censored_chunk_paths, output_path, original_input_path=audio_file)
+
+        if progress_callback:
+            await _call_progress(progress_callback, 1.0, f"✅ Done! All {total_chunks} chunks merged.")
+
+        return output_path
+    finally:
+        if os.path.exists(temp_dir):
+            rmtree(temp_dir, ignore_errors=True)
