@@ -31,8 +31,41 @@ def _get_whisper_device_config():
     return "cpu", "int8"
 
 
+def free_memory():
+    """
+    Forcefully frees unused heap memory and ML arenas back to the OS:
+    1. Triggers Python full garbage collection across all generations.
+    2. Empties PyTorch CUDA cache if applicable.
+    3. Clears TensorFlow Keras session graphs if loaded.
+    4. Invokes Linux glibc malloc_trim(0) to release unused heap pages back to the kernel.
+    """
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        import sys
+        if "tensorflow" in sys.modules:
+            import tensorflow as tf
+            tf.keras.backend.clear_session()
+    except Exception:
+        pass
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+
 async def _transcribe_vulkan_cli(audio_file_path, vulkan_cli, vulkan_model):
-    temp_prefix = os.path.join(tempfile.gettempdir(), f"whisper_vk_{os.getpid()}_{int(time.time()*1000)}")
+    vk_tmp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tmp_vk")
+    os.makedirs(vk_tmp_dir, exist_ok=True)
+    temp_prefix = os.path.join(vk_tmp_dir, f"whisper_vk_{os.getpid()}_{int(time.time()*1000)}")
     temp_wav = f"{temp_prefix}.wav"
     json_path = f"{temp_prefix}.json"
 
@@ -184,6 +217,8 @@ async def separate_audio(input_audio_path, output_dir="separated"):
         Separator = modules["spleeter.separator"].Separator
         separator = Separator('spleeter:2stems-16kHz')  # 2 stems: vocals + instrumental
         separator.separate_to_file(input_audio_path, output_dir)
+        del separator
+        free_memory()
         return f"{output_dir}/separated_audio/vocals.wav", f"{output_dir}/separated_audio/accompaniment.wav"
 
 async def down_pitch(input_path, output_path, semitones):
@@ -201,6 +236,9 @@ async def down_pitch(input_path, output_path, semitones):
     print(f"[-] Down-shifted the pitch, saving..")
     # Save the processed audio
     sf.write(output_path, y_shifted, sr)
+    del y
+    del y_shifted
+    free_memory()
 
 async def get_bad_word_timestamps(audio_file_path, bad_words):
     # 1. CACHE HANDLER
@@ -946,6 +984,9 @@ async def cleanup():
             os.remove(file)
     if os.path.exists('separated'):
         rmtree('separated')
+    if os.path.exists('.tmp_vk'):
+        rmtree('.tmp_vk', ignore_errors=True)
+    free_memory()
 
 async def run_in_thread(coro):
     await asyncio.to_thread(asyncio.run, coro)
@@ -1256,6 +1297,9 @@ async def process_audio_pipeline(
                 except OSError:
                     pass
 
+            # Force glibc & GC memory release after every chunk
+            free_memory()
+
         if progress_callback:
             await _call_progress(progress_callback, 0.92, f"🔄 Rejoining {total_chunks} chunks into final audio...")
         print(f"\n[+] Rejoining {len(censored_chunk_paths)} chunks into {output_path}...")
@@ -1268,3 +1312,4 @@ async def process_audio_pipeline(
     finally:
         if os.path.exists(temp_dir):
             rmtree(temp_dir, ignore_errors=True)
+        free_memory()

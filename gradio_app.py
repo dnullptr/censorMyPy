@@ -8,6 +8,7 @@ from async_toolset import (
     get_audio_duration,
     format_time,
     cleanup,
+    free_memory,
     run_in_thread
 )
 
@@ -127,6 +128,8 @@ async def process_audio(
         end_time = time.time()
         processing_time = f"{end_time - start_time:.2f}s"
         return None, f"❌ Error during processing: {str(e)}", processing_time
+    finally:
+        free_memory()
 
 
 def create_ui():
