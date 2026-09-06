@@ -36,3 +36,5 @@ outputs/
 models/
 *.bin
 bin/
+*.log
+watchdog.log
